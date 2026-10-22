@@ -1,0 +1,287 @@
+name: Build Sudan Runner APK
+
+on:
+  push:
+    branches: [main, "arena/**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      capture_screenshots:
+        description: "Render gameplay screenshots (software GL, adds ~2 min)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: "4.4.1"
+  EXPORT_NAME: "Android"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Validate the project: import every resource, then run the game headless
+  #    for a few hundred frames while the smoke test drives the player.
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Validate project (headless)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: true
+
+      - name: GDScript syntax check
+        run: |
+          python3 -m pip install --quiet "gdtoolkit>=4,<5"
+          fail=0
+          while IFS= read -r f; do
+            if ! gdparse "$f"; then
+              echo "::error file=$f::GDScript parse error"
+              fail=1
+            fi
+          done < <(find scripts -name '*.gd' | sort)
+          exit $fail
+
+      - name: Import project
+        run: godot --headless --import 2>&1 | tail -n 40
+
+      - name: Headless gameplay smoke test
+        run: |
+          set -o pipefail
+          timeout 180 godot --headless --quit-after 1200 -- --smoke 2>&1 | tee smoke.log || true
+          echo "--- errors ---"
+          # Surface offending lines as check annotations: build artifacts cannot
+          # be downloaded from every environment, annotations can.
+          set +e
+          python3 tools/ci_report_errors.py smoke.log
+          report=$?
+          set -e
+          if [ "$report" -ne 0 ]; then
+            tail -n 15 smoke.log | sed 's/^/::error::/'
+            exit 1
+          fi
+          if ! grep -q "SMOKE_OK" smoke.log; then
+            echo "::error::Smoke test did not finish (no SMOKE_OK marker)."
+            tail -n 12 smoke.log | sed 's/^/::error::/'
+            exit 1
+          fi
+          echo "Smoke test passed."
+
+      - name: Upload smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-log
+          path: smoke.log
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # 2. Export a signed (debug key) APK. Debug signing keeps the workflow usable
+  #    without any repository secret; add a release keystore for store builds.
+  # ---------------------------------------------------------------------------
+  apk:
+    name: Export APK
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK command line tools
+        run: |
+          set -euo pipefail
+          SDK="$HOME/android-sdk"
+          mkdir -p "$SDK/cmdline-tools"
+          curl -sSL -o /tmp/cmdline-tools.zip \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q /tmp/cmdline-tools.zip -d "$SDK/cmdline-tools"
+          mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+          export ANDROID_SDK_ROOT="$SDK"
+          export ANDROID_HOME="$SDK"
+          export PATH="$SDK/cmdline-tools/latest/bin:$SDK/platform-tools:$PATH"
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "platform-tools" "platforms;android-34" \
+            "build-tools;34.0.0" "build-tools;35.0.0" | tail -n 5
+          ls "$SDK/build-tools"
+          {
+            echo "ANDROID_SDK_ROOT=$SDK"
+            echo "ANDROID_HOME=$SDK"
+          } >> "$GITHUB_ENV"
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+          echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+
+      - name: Setup Godot with export templates
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: true
+
+      - name: Configure Godot for Android export
+        run: |
+          mkdir -p "$HOME/.config/godot"
+          godot --headless --editor --quit || true
+          python3 tools/ci_configure_android.py
+          python3 - <<'PY'
+          import glob, os
+          for path in glob.glob(os.path.expanduser("~/.config/godot/editor_settings-*.tres")):
+              print("---", path)
+              print(open(path).read()[-400:])
+          PY
+
+      - name: Import project
+        run: godot --headless --import 2>&1 | tail -n 20
+
+      - name: Diagnostics
+        run: |
+          godot --version
+          ls -la "$HOME/.local/share/godot/export_templates" || true
+          ls -la "$HOME/.config/godot" || true
+          ls "$ANDROID_SDK_ROOT/build-tools" || true
+          ls -la "$HOME/.android" || true
+
+      - name: Create CI signing key
+        run: |
+          # Throwaway key so the workflow needs no repository secret. Replace it
+          # with your own keystore (and keep it safe!) for Play Store updates.
+          keytool -genkeypair -v             -keystore ci-release.keystore             -alias gadaman             -keyalg RSA -keysize 2048 -validity 10000             -storepass gadaman -keypass gadaman             -dname "CN=Sudan Runner CI, O=Gadaman, C=SD"             -deststoretype pkcs12
+          ls -lh ci-release.keystore
+
+      - name: Export APK
+        env:
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: ${{ github.workspace }}/ci-release.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: gadaman
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: gadaman
+        run: |
+          mkdir -p build
+          godot --headless --export-release "$EXPORT_NAME" build/sudan-runner.apk 2>&1 | tee export.log || true
+          if [ ! -f build/sudan-runner.apk ]; then
+            echo "::warning::Release export failed - falling back to a debug-signed APK."
+            godot --headless --export-debug "$EXPORT_NAME" build/sudan-runner.apk 2>&1 | tee -a export.log || true
+          fi
+          if [ ! -f build/sudan-runner.apk ]; then
+            echo "::error::APK was not produced"
+            # The actionable lines are the ones right after
+            # "due to configuration errors:" - surface those first.
+            grep -A6 "due to configuration errors" export.log \
+              | head -n 7 | while IFS= read -r line; do echo "::error::$line"; done
+            grep -nE "Missing|missing|not configured|Invalid|Unable" export.log \
+              | tail -n 3 | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
+          ls -lh build
+          python3 - <<'PY'
+          import zipfile
+          p = "build/sudan-runner.apk"
+          with zipfile.ZipFile(p) as z:
+              names = z.namelist()
+              libs = [n for n in names if n.startswith("lib/")]
+              print("APK entries:", len(names))
+              print("native libs:", libs)
+              assert any("arm64" in n for n in libs), "arm64-v8a native library missing"
+              assert any("armeabi" in n for n in libs), "armeabi-v7a native library missing"
+          PY
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sudan-runner-apk
+          path: build/sudan-runner.apk
+          if-no-files-found: error
+
+      - name: Publish rolling "latest-build" release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view latest-build >/dev/null 2>&1 || \
+            gh release create latest-build --latest --target "$GITHUB_SHA" \
+              --title "Latest build (auto)" \
+              --notes "Automatically built APK from the latest commit. Download sudan-runner.apk below and install it on any Android 7+ phone (allow install from unknown sources)."
+          gh release upload latest-build build/sudan-runner.apk --clobber
+          gh release edit latest-build --target "$GITHUB_SHA"
+
+      - name: Attach APK to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
+            gh release create "${GITHUB_REF_NAME}" --title "Sudan Runner ${GITHUB_REF_NAME}" \
+              --notes "Android build of Sudan Runner (Gadaman). Install the APK on any Android 7+ phone."
+          gh release upload "${GITHUB_REF_NAME}" build/sudan-runner.apk --clobber
+
+  # ---------------------------------------------------------------------------
+  # 3. Render real screenshots on a software GL stack (manual trigger).
+  #    Used to visually review the procedural art without a physical device.
+  # ---------------------------------------------------------------------------
+  screenshots:
+    name: Capture screenshots
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.capture_screenshots) ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[shots]'))
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Install software GL + X virtual framebuffer
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libgl1 libglx-mesa0 libglu1-mesa mesa-utils
+          echo "--- glxinfo ---"
+          xvfb-run -a glxinfo -B 2>&1 | head -n 12 || true
+
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: false
+
+      - name: Import project
+        run: godot --headless --import 2>&1 | tail -n 5
+
+      - name: Render screenshots
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: "llvmpipe"
+        run: |
+          set -o pipefail
+          timeout 240 xvfb-run -a -s "-screen 0 1280x720x24" \
+            godot --rendering-driver opengl3 --resolution 1280x720 -- --screenshot 2>&1 | tee shots.log || true
+          grep -E "SHOT|SCREENSHOTS_DONE|ERROR" shots.log | tail -n 20 || true
+          mkdir -p docs/screenshots
+          USER_DIR="$HOME/.local/share/godot/app_userdata/Sudan Runner"
+          ls -la "$USER_DIR" || true
+          cp "$USER_DIR"/shot_*.png docs/screenshots/ 2>/dev/null || true
+          ls -la docs/screenshots
+
+      - name: Commit screenshots to the branch
+        run: |
+          if ! ls docs/screenshots/shot_*.png >/dev/null 2>&1; then
+            echo "::warning::No screenshots were rendered."
+            exit 0
+          fi
+          git config user.name "Sudan Runner CI"
+          git config user.email "ci@users.noreply.github.com"
+          git add docs/screenshots/*.png
+          git commit -m "docs: automated gameplay screenshots"
+          git push origin "HEAD:${{ github.ref_name }}"
