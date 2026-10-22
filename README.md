@@ -260,3 +260,10 @@ pip install "gdtoolkit>=4,<5" && for f in $(find scripts -name '*.gd'); do gdpar
 - مستوحاة من كلاسيكيات الجري اللانهائي، لكن كل المحتوى سوداني أصلي.
 
 صنع بـ ❤️ لمشروع **gadaman**.
+
+### ترقية الرسومات الواقعية / Semi-realistic art upgrade
+
+راجع [`docs/ASSET_IMPORT_GUIDE.md`](docs/ASSET_IMPORT_GUIDE.md) لخطوات Mixamo/GLB
+والـAnimationTree وتراخيص Poly Pizza/Sketchfab. يمكن تشغيل
+`scripts/tools/SetupRealisticRunner.gd` من محرر Godot بعد تحديد نموذج البطل لتطبيق
+بدلة السودان المعدنية وReflectionProbe تلقائياً.

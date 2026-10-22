@@ -14,10 +14,12 @@ extends Node3D
 @onready var ui: UiRoot = $UI
 
 var _environment: Environment
+var _suit_probe: ReflectionProbe
 
 
 func _ready() -> void:
 	_setup_lighting()
+	_setup_suit_reflections()
 	track.set_player(player)
 	player.track = track
 	camera_rig.setup(player, track)
@@ -27,6 +29,7 @@ func _ready() -> void:
 	track.obstacle_smashed.connect(_on_obstacle_smashed)
 	track.player_stumbled.connect(_on_player_stumbled)
 	player.landed.connect(_on_player_landed)
+	player.slide_started.connect(_on_player_slide)
 	player.action_intensity_changed.connect(camera_rig.set_action_intensity)
 	ui.play_requested.connect(_on_play_requested)
 	ui.restart_requested.connect(_on_play_requested)
@@ -78,14 +81,34 @@ func _setup_lighting() -> void:
 	_environment.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	world_environment.environment = _environment
 	Perf.apply_to_environment(_environment)
+	if RenderingServer.get_current_rendering_method() != "gl_compatibility":
+		_environment.volumetric_fog_enabled = Perf.tier == Perf.Tier.HIGH
+		_environment.volumetric_fog_density = 0.018
+		_environment.volumetric_fog_length = 72.0
+		_environment.volumetric_fog_detail_spread = 1.6
 
 	# Low, warm sun: long shadows across the asphalt, sun disc near the horizon.
 	sun.rotation_degrees = Vector3(-26.0, -142.0, 0.0)
 	sun.light_color = Color("#ffd0a0")
 	sun.light_energy = 1.45
-	sun.light_specular = 0.35
+	sun.light_specular = 0.72
+	sun.angular_distance = 1.1
 	Perf.apply_to_sun(sun, camera_rig)
 	Perf.apply_to_camera(camera_rig)
+
+
+func _setup_suit_reflections() -> void:
+	if RenderingServer.get_current_rendering_method() == "gl_compatibility":
+		return
+	_suit_probe = ReflectionProbe.new()
+	_suit_probe.name = "SuitReflectionProbe"
+	_suit_probe.position = Vector3(0.0, 1.1, 0.0)
+	_suit_probe.size = Vector3(8.0, 5.0, 12.0)
+	_suit_probe.max_distance = 22.0
+	_suit_probe.intensity = 1.15
+	_suit_probe.box_projection = true
+	_suit_probe.update_mode = ReflectionProbe.UPDATE_ONCE
+	add_child(_suit_probe)
 
 
 func _on_tier_changed(_tier: int, _info: Dictionary) -> void:
@@ -136,7 +159,7 @@ func _on_prop_hit(reason_key: String) -> void:
 
 func _on_obstacle_smashed(at: Vector3) -> void:
 	camera_rig.shake(0.28, 0.22)
-	fx.crash(at)
+	fx.crate_debris(at)
 	Audio.play_sfx("hit", 0.04, 0.75)
 
 
@@ -145,6 +168,10 @@ func _on_player_stumbled(reason_key: String) -> void:
 	fx.crash(player.global_position)
 	ui.show_crash_reason(reason_key)
 	Audio.play_sfx("hit", 0.0, 0.65)
+
+
+func _on_player_slide() -> void:
+	fx.slide_dust(player.global_position)
 
 
 func _on_player_landed() -> void:

@@ -65,12 +65,13 @@ static func build(variant: int, slot: int, density: float) -> ArrayMesh:
 	rng.seed = 7919 * (slot + 1) + 104729 * variant
 
 	var road := MeshKit.begin()
+	var walkways := MeshKit.begin()
 	var art := MeshKit.begin()
 	var ground := MeshKit.begin()
 
 	_build_ground(ground)
 	_build_road(road, rng)
-	_build_walkways(art)
+	_build_walkways(walkways)
 
 	match variant % VARIANT_COUNT:
 		0:
@@ -87,6 +88,7 @@ static func build(variant: int, slot: int, density: float) -> ArrayMesh:
 	_build_flags(art, rng, density)
 
 	var mesh := road.commit()
+	walkways.commit(mesh)
 	art.commit(mesh)
 	ground.commit(mesh)
 	_cache[key] = mesh

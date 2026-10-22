@@ -30,10 +30,11 @@ func apply(new_variant: int, new_slot: int, density: float) -> void:
 
 func _apply_materials() -> void:
 	_mesh_instance.set_surface_override_material(0, MeshKit.road_material())
+	_mesh_instance.set_surface_override_material(1, MeshKit.concrete_material())
 	var vertex_mat := MeshKit.vertex_material_cheap() if Perf.tier == Perf.Tier.LOW \
 			else MeshKit.vertex_material()
-	_mesh_instance.set_surface_override_material(1, vertex_mat)
-	_mesh_instance.set_surface_override_material(2, MeshKit.sand_material())
+	_mesh_instance.set_surface_override_material(2, vertex_mat)
+	_mesh_instance.set_surface_override_material(3, MeshKit.sand_material())
 
 
 func refresh_materials() -> void:
