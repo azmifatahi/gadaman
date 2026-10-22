@@ -1,0 +1,154 @@
+name: Build Sudan Runner APK
+
+on:
+  push:
+    branches: [main, "arena/**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.4.1"
+  EXPORT_NAME: "Android"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Validate the project: import every resource, then run the game headless
+  #    for a few hundred frames while the smoke test drives the player.
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Validate project (headless)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: true
+
+      - name: GDScript syntax check
+        run: |
+          python3 -m pip install --quiet "gdtoolkit>=4,<5"
+          fail=0
+          while IFS= read -r f; do
+            if ! gdparse "$f"; then
+              echo "::error file=$f::GDScript parse error"
+              fail=1
+            fi
+          done < <(find scripts -name '*.gd' | sort)
+          exit $fail
+
+      - name: Import project
+        run: godot --headless --import 2>&1 | tail -n 40
+
+      - name: Headless gameplay smoke test
+        run: |
+          set -o pipefail
+          timeout 180 godot --headless --quit-after 1200 -- --smoke 2>&1 | tee smoke.log
+          echo "--- errors ---"
+          if grep -nE "SCRIPT ERROR|Parse Error|Invalid access|Invalid set|Cannot call" smoke.log; then
+            echo "::error::Runtime errors detected in the headless run"
+            exit 1
+          fi
+          grep -q "SMOKE_OK" smoke.log && echo "Smoke test passed."
+
+      - name: Upload smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-log
+          path: smoke.log
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # 2. Export a signed (debug key) APK. Debug signing keeps the workflow usable
+  #    without any repository secret; add a release keystore for store builds.
+  # ---------------------------------------------------------------------------
+  apk:
+    name: Export APK
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK build tools
+        run: |
+          sdkmanager --install "platform-tools" "platforms;android-34" \
+            "build-tools;34.0.0" "build-tools;35.0.0" > /dev/null
+          echo "sdk: $ANDROID_SDK_ROOT"
+          echo "java: $JAVA_HOME"
+
+      - name: Setup Godot with export templates
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: true
+
+      - name: Configure Godot for Android export
+        run: |
+          mkdir -p "$HOME/.config/godot"
+          godot --headless --editor --quit || true
+          python3 tools/ci_configure_android.py
+          python3 - <<'PY'
+          import glob, os
+          for path in glob.glob(os.path.expanduser("~/.config/godot/editor_settings-*.tres")):
+              print("---", path)
+              print(open(path).read()[-400:])
+          PY
+
+      - name: Import project
+        run: godot --headless --import 2>&1 | tail -n 20
+
+      - name: Export debug APK
+        run: |
+          mkdir -p build
+          godot --headless --export-debug "$EXPORT_NAME" build/sudan-runner.apk 2>&1 | tee export.log
+          if [ ! -f build/sudan-runner.apk ]; then
+            echo "::error::APK was not produced"
+            tail -n 80 export.log
+            exit 1
+          fi
+          ls -lh build
+          python3 - <<'PY'
+          import zipfile
+          p = "build/sudan-runner.apk"
+          with zipfile.ZipFile(p) as z:
+              names = z.namelist()
+              libs = [n for n in names if n.startswith("lib/")]
+              print("APK entries:", len(names))
+              print("native libs:", libs)
+              assert any("arm64" in n for n in libs), "arm64-v8a native library missing"
+              assert any("armeabi" in n for n in libs), "armeabi-v7a native library missing"
+          PY
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sudan-runner-apk
+          path: build/sudan-runner.apk
+          if-no-files-found: error
+
+      - name: Attach APK to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
+            gh release create "${GITHUB_REF_NAME}" --title "Sudan Runner ${GITHUB_REF_NAME}" \
+              --notes "Android build of Sudan Runner (Gadaman). Install the APK on any Android 7+ phone."
+          gh release upload "${GITHUB_REF_NAME}" build/sudan-runner.apk --clobber
