@@ -152,9 +152,12 @@ jobs:
           godot --headless --export-debug "$EXPORT_NAME" build/sudan-runner.apk 2>&1 | tee export.log
           if [ ! -f build/sudan-runner.apk ]; then
             echo "::error::APK was not produced"
-            grep -nE "ERROR|Error|error|missing|Missing|not found|Invalid|invalid|Unable" export.log \
-              | tail -n 12 | while IFS= read -r line; do echo "::error::$line"; done
-            tail -n 6 export.log | while IFS= read -r line; do echo "::error::$line"; done
+            # The actionable lines are the ones right after
+            # "due to configuration errors:" - surface those first.
+            grep -A6 "due to configuration errors" export.log \
+              | head -n 7 | while IFS= read -r line; do echo "::error::$line"; done
+            grep -nE "Missing|missing|not configured|Invalid|Unable" export.log \
+              | tail -n 3 | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           fi
           ls -lh build
