@@ -191,8 +191,8 @@ func _physics_process(delta: float) -> void:
 	_update_lateral(delta)
 	_update_vertical(delta)
 	_update_tilt(delta)
+	var spd: float = track.speed if track else 11.0
 	if _model:
-		var spd: float = track.speed if track else 11.0
 		run_blend = move_toward(run_blend, clampf((spd - 9.0) / 18.0, 0.0, 1.0), delta * 2.8)
 		_model.animate(delta, spd, is_sliding, is_airborne)
 	var intensity := clampf((spd - 11.0) / 16.0, 0.0, 1.0)

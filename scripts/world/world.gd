@@ -92,7 +92,7 @@ func _setup_lighting() -> void:
 	sun.light_color = Color("#ffd0a0")
 	sun.light_energy = 1.45
 	sun.light_specular = 0.72
-	sun.angular_distance = 1.1
+	sun.light_angular_distance = 1.1
 	Perf.apply_to_sun(sun, camera_rig)
 	Perf.apply_to_camera(camera_rig)
 
