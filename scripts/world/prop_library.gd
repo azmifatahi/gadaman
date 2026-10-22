@@ -132,7 +132,7 @@ static func obstacle_mesh(kind: int) -> ArrayMesh:
 
 static func _build_barrier(st: SurfaceTool) -> void:
 	# A-frame legs.
-	for sx in [-0.92, 0.92]:
+	for sx: float in [-0.92, 0.92]:
 		MeshKit.add_box(st, Vector3(sx, 0.42, 0), Vector3(0.12, 0.84, 0.5), C["dark_metal"])
 		MeshKit.add_box(st, Vector3(sx, 0.07, 0.02), Vector3(0.34, 0.14, 0.62), C["metal"])
 	# Striped plank (red / white, the classic Khartoum road works barrier).
@@ -161,7 +161,7 @@ static func _build_crates(st: SurfaceTool) -> void:
 	MeshKit.add_box(st, Vector3(-0.42, 0.35, 0), Vector3(0.68, 0.7, 0.68), C["wood"])
 	MeshKit.add_box(st, Vector3(0.38, 0.35, 0.05), Vector3(0.66, 0.7, 0.66), C["wood_light"])
 	MeshKit.add_box(st, Vector3(-0.02, 0.92, 0.02), Vector3(0.62, 0.44, 0.6), C["wood_dark"])
-	for sx in [-0.42, 0.38]:
+	for sx: float in [-0.42, 0.38]:
 		MeshKit.add_box(st, Vector3(sx, 0.35, 0.36), Vector3(0.7, 0.08, 0.03), C["wood_dark"])
 	MeshKit.add_box(st, Vector3(0, 1.16, 0.02), Vector3(0.5, 0.05, 0.5), C["wood"])
 
@@ -172,14 +172,14 @@ static func _build_bus(st: SurfaceTool) -> void:
 	MeshKit.add_box(st, Vector3(0, 0.42, 0), Vector3(2.18, 0.5, 5.22), C["blue"])
 	MeshKit.add_box(st, Vector3(0, 1.92, 0), Vector3(2.0, 0.28, 4.9), C["white"])
 	# Windows.
-	for sx in [-1.09, 1.09]:
+	for sx: float in [-1.09, 1.09]:
 		for i in 3:
 			MeshKit.add_box(st, Vector3(sx, 1.55, -1.5 + float(i) * 1.5),
 					Vector3(0.03, 0.62, 1.12), C["glass"])
 	MeshKit.add_box(st, Vector3(0, 1.55, -2.61), Vector3(1.82, 0.66, 0.04), C["glass"])
 	MeshKit.add_box(st, Vector3(0, 1.5, 2.62), Vector3(1.7, 0.5, 0.04), C["glass"])
 	# Flag bands along both sides (red / white / black) + green hoist triangle.
-	for sx in [-1.1, 1.1]:
+	for sx: float in [-1.1, 1.1]:
 		var facing := 1.0 if sx > 0.0 else -1.0
 		var x := sx
 		var z0 := 2.4
@@ -189,12 +189,12 @@ static func _build_bus(st: SurfaceTool) -> void:
 		_side_band(st, x, 1.21, z0, length, 0.13, C["black"], facing)
 		_side_tri(st, x, 0.95, z0, 1.5, 0.39, C["green"], facing)
 	# Wheels, bumpers, lights.
-	for wz in [-1.75, 1.75]:
-		for wx in [-1.0, 1.0]:
+	for wz: float in [-1.75, 1.75]:
+		for wx: float in [-1.0, 1.0]:
 			MeshKit.add_wheel(st, Vector3(wx, 0.46, wz), 0.46, 0.28, C["black"], 10)
 	MeshKit.add_box(st, Vector3(0, 0.35, 2.66), Vector3(2.1, 0.22, 0.14), C["dark_metal"])
 	MeshKit.add_box(st, Vector3(0, 0.35, -2.66), Vector3(2.1, 0.22, 0.14), C["dark_metal"])
-	for lx in [-0.78, 0.78]:
+	for lx: float in [-0.78, 0.78]:
 		MeshKit.add_box(st, Vector3(lx, 0.72, -2.66), Vector3(0.3, 0.18, 0.06), Color("#ffe9b0"))
 	# Roof rack with luggage.
 	MeshKit.add_box(st, Vector3(0, 2.09, 0.4), Vector3(1.7, 0.12, 2.6), C["wood"])
@@ -205,7 +205,7 @@ static func _build_bus(st: SurfaceTool) -> void:
 static func _build_cart(st: SurfaceTool) -> void:
 	# Karu: hand cart with two big wooden wheels, piled with sacks.
 	MeshKit.add_box(st, Vector3(0, 0.62, 0), Vector3(1.7, 0.14, 2.1), C["wood"])
-	for sx in [-0.8, 0.8]:
+	for sx: float in [-0.8, 0.8]:
 		MeshKit.add_box(st, Vector3(sx, 0.78, 0), Vector3(0.08, 0.32, 2.1), C["wood_dark"])
 	MeshKit.add_box(st, Vector3(0, 0.86, -1.12), Vector3(1.6, 0.36, 0.08), C["wood_light"])
 	MeshKit.add_wheel(st, Vector3(-0.92, 0.58, 0.1), 0.58, 0.14, C["wood_dark"], 12)
@@ -226,8 +226,8 @@ static func _build_cart(st: SurfaceTool) -> void:
 static func _build_table(st: SurfaceTool) -> void:
 	# Street vendor stall: table, goods and a striped canopy.
 	MeshKit.add_box(st, Vector3(0, 0.78, 0), Vector3(1.9, 0.1, 1.2), C["wood_light"])
-	for sx in [-0.85, 0.85]:
-		for sz in [-0.5, 0.5]:
+	for sx: float in [-0.85, 0.85]:
+		for sz: float in [-0.5, 0.5]:
 			MeshKit.add_box(st, Vector3(sx, 0.38, sz), Vector3(0.08, 0.76, 0.08), C["wood_dark"])
 	# Goods: stacked cups and fruit.
 	for i in 4:
@@ -235,8 +235,8 @@ static func _build_table(st: SurfaceTool) -> void:
 				Vector3(0.24, 0.16, 0.24), C["orange"] if i % 2 == 0 else C["red"])
 	MeshKit.add_box(st, Vector3(0.55, 0.92, 0.28), Vector3(0.5, 0.18, 0.4), C["teal"])
 	# Poles + canopy.
-	for sx in [-0.95, 0.95]:
-		for sz in [-0.6, 0.6]:
+	for sx: float in [-0.95, 0.95]:
+		for sz: float in [-0.6, 0.6]:
 			MeshKit.add_box(st, Vector3(sx, 1.3, sz), Vector3(0.06, 1.8, 0.06), C["metal"])
 	MeshKit.add_box(st, Vector3(0, 2.18, 0), Vector3(2.3, 0.08, 1.6), C["white"])
 	for i in 5:
@@ -247,7 +247,7 @@ static func _build_table(st: SurfaceTool) -> void:
 
 static func _build_low_bar(st: SurfaceTool) -> void:
 	# Steel posts either side + a low banner you have to slide under.
-	for sx in [-1.12, 1.12]:
+	for sx: float in [-1.12, 1.12]:
 		MeshKit.add_box(st, Vector3(sx, 0.95, 0), Vector3(0.11, 1.9, 0.11), C["metal"])
 		MeshKit.add_box(st, Vector3(sx, 0.05, 0), Vector3(0.3, 0.1, 0.3), C["dark_metal"])
 	MeshKit.add_box(st, Vector3(0, 1.62, 0), Vector3(2.3, 0.1, 0.1), C["dark_metal"])

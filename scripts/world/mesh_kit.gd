@@ -102,7 +102,7 @@ static func add_cylinder(st: SurfaceTool, base: Vector3, radius: float, height: 
 static func add_wheel(st: SurfaceTool, center: Vector3, radius: float, width: float,
 		color: Color, sides: int = 10) -> void:
 	var half := width * 0.5
-	for side in [-1.0, 1.0]:
+	for side: float in [-1.0, 1.0]:
 		var cx: float = center.x + half * side
 		var ring_prev := Vector3.ZERO
 		for i in sides + 1:
@@ -150,7 +150,7 @@ static func add_flag_panel(st: SurfaceTool, origin: Vector3, width: float, heigh
 	for i in 3:
 		var y0 := origin.y + band * float(i)
 		var y1 := y0 + band
-		var col := [red, white, black][i]
+		var col: Color = [red, white, black][i]
 		if f > 0:
 			add_quad(st, Vector3(x0, y0, z), Vector3(x1, y0, z), Vector3(x1, y1, z),
 					Vector3(x0, y1, z), col)
