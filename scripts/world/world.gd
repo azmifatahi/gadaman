@@ -24,7 +24,10 @@ func _ready() -> void:
 
 	track.prop_hit.connect(_on_prop_hit)
 	track.cup_collected.connect(_on_cup_collected)
+	track.obstacle_smashed.connect(_on_obstacle_smashed)
+	track.player_stumbled.connect(_on_player_stumbled)
 	player.landed.connect(_on_player_landed)
+	player.action_intensity_changed.connect(camera_rig.set_action_intensity)
 	ui.play_requested.connect(_on_play_requested)
 	ui.restart_requested.connect(_on_play_requested)
 	ui.resume_requested.connect(_on_resume_requested)
@@ -129,6 +132,19 @@ func _on_prop_hit(reason_key: String) -> void:
 	fx.crash(player.global_position)
 	ui.show_crash_reason(reason_key)
 	Settings.vibrate(90)
+
+
+func _on_obstacle_smashed(at: Vector3) -> void:
+	camera_rig.shake(0.28, 0.22)
+	fx.crash(at)
+	Audio.play_sfx("hit", 0.04, 0.75)
+
+
+func _on_player_stumbled(reason_key: String) -> void:
+	camera_rig.shake(0.38, 0.3)
+	fx.crash(player.global_position)
+	ui.show_crash_reason(reason_key)
+	Audio.play_sfx("hit", 0.0, 0.65)
 
 
 func _on_player_landed() -> void:

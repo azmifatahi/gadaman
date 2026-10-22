@@ -7,7 +7,7 @@
 class_name RunnerModel
 extends Node3D
 
-enum State { IDLE, RUN, CRASH }
+enum State { IDLE, RUN, STUMBLE, CRASH }
 
 const HIP_Y := 0.78
 const SHOULDER_Y := 1.34
@@ -53,14 +53,15 @@ static func _build_materials() -> void:
 	if _mat_flag == null:
 		var m := StandardMaterial3D.new()
 		m.albedo_texture = flag_tex
-		m.roughness = 0.72
-		m.metallic = 0.0
+		m.roughness = 0.24
+		m.metallic = 0.78
 		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 		_mat_flag = m
 	if _mat_flag_double == null:
 		var m2 := StandardMaterial3D.new()
 		m2.albedo_texture = load("res://assets/textures/flag_stripes.png")
-		m2.roughness = 0.8
+		m2.roughness = 0.28
+		m2.metallic = 0.72
 		m2.cull_mode = BaseMaterial3D.CULL_DISABLED
 		_mat_flag_double = m2
 	if _mat_skin == null:
@@ -230,6 +231,9 @@ func animate(delta: float, speed: float, sliding: bool, airborne: bool) -> void:
 	if state == State.CRASH:
 		_animate_crash(delta)
 		return
+	if state == State.STUMBLE:
+		_animate_stumble(delta)
+		return
 
 	var target_pitch := 0.0
 	var target_height := 0.0
@@ -268,6 +272,19 @@ func animate(delta: float, speed: float, sliding: bool, airborne: bool) -> void:
 	_cape_swing = lerp(_cape_swing, 0.75 + speed * 0.028, blend)
 	_cape.rotation.x = -_cape_swing + sin(_cycle * 2.3) * 0.12
 	_cape.rotation.z = sin(_cycle * 1.7) * 0.06
+
+
+func _animate_stumble(delta: float) -> void:
+	_cycle += delta * 15.0
+	var blend := 1.0 - exp(-delta * 12.0)
+	_root.rotation.x = lerp(_root.rotation.x, -0.42 + sin(_cycle) * 0.12, blend)
+	_root.rotation.z = lerp(_root.rotation.z, sin(_cycle * 0.55) * 0.24, blend)
+	_root.position.y = lerp(_root.position.y, -0.08 + absf(sin(_cycle)) * 0.08, blend)
+	_arm_l.rotation.x = lerp(_arm_l.rotation.x, -1.45, blend)
+	_arm_r.rotation.x = lerp(_arm_r.rotation.x, -1.8, blend)
+	_leg_l.rotation.x = sin(_cycle) * 0.52
+	_leg_r.rotation.x = -sin(_cycle) * 0.52
+	_head.rotation.z = -_root.rotation.z * 0.55
 
 
 func _animate_crash(delta: float) -> void:
