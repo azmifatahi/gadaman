@@ -278,3 +278,56 @@ build every street, obstacle and cup at runtime and cache the results.
 
 Keep the rules: **no node creation during a run**, **no physics engine**, and
 **every visual decision goes through `Perf`**.
+
+---
+
+## 10. Semi-realistic asset and animation upgrade path (Godot 4)
+
+This repository is a **Godot 4/GDScript project, not Unity/URP**. The equivalent
+production pipeline is Godot's Forward+/Mobile PBR renderer. Do not add Unity
+`.cs` files: they cannot run in this project. The gameplay interfaces above are
+kept independent from the visual model so an art team can replace generated
+meshes without rewriting the runner.
+
+### Hero import contract
+
+1. Export a smooth-shaded, skinned GLB in metres, facing **-Z**, with the feet at
+   Y=0. Use one armature and no more than four bone weights per vertex.
+2. Author three 2K texture sets (1K for mobile): Sudan red/white/black suit,
+   green accents, and chrome trim. Pack roughness/metallic/AO into channels.
+   Chrome should use metallic 0.75–0.9 and roughness 0.18–0.32; cloth uses
+   metallic 0 and roughness 0.55–0.75. Never make the entire suit mirror-like.
+3. Create clips named `jog`, `sprint`, `ultra_sprint`, `lane_left`, `lane_right`,
+   `jump`, `fall`, `land`, `slide`, `hurdle`, `chest_bump`, `stumble`, `recover`,
+   and `crash`. Enable looping only on the three locomotion clips.
+4. In an `AnimationTree`, use a 1D locomotion BlendSpace at 0/0.55/1 and a
+   separate additive lane BlendSpace at -1/0/1. Drive them from
+   `PlayerController.run_blend` and `lane_blend`. One-shot nodes own jump,
+   landing, slide, hurdle, bump and recovery. Root motion should be disabled in
+   Z because the track scrolls; lateral/root rotation may be consumed visually.
+5. Keep the generated `RunnerModel` as the low-tier LOD. Use the imported skinned
+   hero for medium/high, and create 35k / 15k / 4k triangle LODs with transition
+   distances around 14 m and 32 m. All variants must share the same silhouette
+   and animation names.
+
+### Environment and lighting
+
+* Import asphalt, concrete, brick, rusty metal and wood as tileable PBR sets;
+  use decals/secondary UV overlays for cracks and pothole edges rather than
+  unique 4K maps. Build Amjad, karu, palm and acacia assets with three LODs.
+* For high-spec devices switch the project renderer to **Mobile** or Forward+
+  and enable reflection probes, subtle glow, SSAO and motion blur. Keep the
+  current Compatibility renderer and baked/emissive fallback for low-end
+  Android. The warm sun, filmic tone map, fog and tier controls are configured
+  in `world.gd` and `performance_manager.gd`.
+* Keep transparent dust overdraw small. `Fx` and track props are pooled; imported
+  replacements must preserve pooling and must not instantiate during a run.
+
+### New action-runner contracts
+
+`TrackManager.start_delivery(drink, distance, seconds)` starts a timed Aradaib,
+Karkadeh or Gongolez delivery stage. It emits `delivery_updated`,
+`delivery_completed`, and `delivery_failed` for a mission HUD. At ultra-sprint,
+crates are chest-bumped for bonus points. Barrier/pothole mistakes trigger a
+stumble, speed penalty and recovery grace period; major obstacles still crash.
+Camera banking uses real lateral velocity, while action intensity widens FOV.

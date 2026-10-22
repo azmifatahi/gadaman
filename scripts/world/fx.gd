@@ -1,70 +1,93 @@
-## Pooled particle effects: dust, pickups, crash and the "new best" confetti.
-##
-## Only three CPUParticles3D nodes exist for the whole game. They are moved and
-## re-fired, never instantiated during a run. Amounts scale with the quality tier
-## (Perf.particle_amount), so a low-end phone emits ~40% of the particles.
+## Pooled GPU effects for action impacts. No emitter is allocated during a run.
 class_name Fx
 extends Node3D
 
-const DUST_COLOR := Color(0.82, 0.71, 0.55)
-const CUP_COLOR := Color(1.0, 0.82, 0.28)
-const CONFETTI := [Color("#d21034"), Color("#ffffff"), Color("#009a00"), Color("#f2b705")]
+const DUST_COLOR := Color(0.82, 0.71, 0.55, 0.72)
+const CUP_COLOR := Color(1.0, 0.82, 0.28, 0.95)
+const WOOD_COLOR := Color("#9a6234")
+const CONFETTI := [Color("#d21034"), Color.WHITE, Color("#009a00"), Color("#f2b705")]
 
-var _dust: CPUParticles3D
-var _sparkle: CPUParticles3D
-var _confetti: CPUParticles3D
-var _puff_texture: Texture2D
-var _materials: Dictionary = {}
+var _dust: GPUParticles3D
+var _sparkle: GPUParticles3D
+var _debris: GPUParticles3D
+var _confetti: GPUParticles3D
 
 
 func _ready() -> void:
-	_puff_texture = load("res://assets/textures/puff.png")
-	_dust = _make_particles(DUST_COLOR, 14, 0.55, 2.2, 1.1)
-	_sparkle = _make_particles(CUP_COLOR, 10, 0.45, 2.8, 0.55)
-	_confetti = _make_particles(Color.WHITE, 26, 1.4, 4.5, 0.75)
-	_confetti.one_shot = true
-	_confetti.emitting = false
+	_dust = _make_billboard("Dust", DUST_COLOR, 20, 0.72, 3.0, 0.42)
+	_sparkle = _make_billboard("DrinkSparkle", CUP_COLOR, 18, 0.6, 4.2, 0.20)
+	_confetti = _make_billboard("Confetti", Color.WHITE, 34, 1.5, 5.8, 0.16)
+	_debris = _make_debris()
 
 
-func _make_particles(color: Color, base_amount: int, lifetime: float,
-		velocity: float, scale: float) -> CPUParticles3D:
-	var p := CPUParticles3D.new()
-	p.amount = maxi(4, int(float(base_amount) * maxf(Perf.particle_amount, 0.35)))
-	p.lifetime = lifetime
-	p.one_shot = true
-	p.emitting = false
-	p.explosiveness = 0.9
-	p.randomness = 0.6
-	p.local_coords = false
-	p.direction = Vector3(0, 1, 0)
-	p.spread = 55.0
-	p.gravity = Vector3(0, -7.5, 0)
-	p.initial_velocity_min = velocity * 0.55
-	p.initial_velocity_max = velocity
-	p.scale_amount_min = scale * 0.55
-	p.scale_amount_max = scale
-	p.damping_min = 0.4
-	p.damping_max = 1.2
+func _base_process(color: Color, velocity: float) -> ParticleProcessMaterial:
+	var process := ParticleProcessMaterial.new()
+	process.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	process.emission_sphere_radius = 0.28
+	process.direction = Vector3(0, 1, 0)
+	process.spread = 62.0
+	process.gravity = Vector3(0, -8.5, 0)
+	process.initial_velocity_min = velocity * 0.55
+	process.initial_velocity_max = velocity
+	process.scale_min = 0.55
+	process.scale_max = 1.25
+	process.color = color
+	return process
 
+
+func _make_billboard(label: String, color: Color, amount: int, lifetime: float,
+		velocity: float, size: float) -> GPUParticles3D:
+	var particles := GPUParticles3D.new()
+	particles.name = label
+	particles.amount = maxi(5, int(amount * Perf.particle_amount))
+	particles.lifetime = lifetime
+	particles.one_shot = true
+	particles.explosiveness = 0.92
+	particles.randomness = 0.72
+	particles.emitting = false
+	particles.process_material = _base_process(color, velocity)
 	var quad := QuadMesh.new()
-	quad.size = Vector2(0.55, 0.55)
-	p.mesh = quad
-	var mat := StandardMaterial3D.new()
-	mat.albedo_texture = _puff_texture
-	mat.albedo_color = color
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
-	mat.vertex_color_use_as_albedo = true
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	p.material_override = mat
-	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_materials[p] = mat
-	add_child(p)
-	return p
+	quad.size = Vector2(size, size)
+	var material := StandardMaterial3D.new()
+	material.albedo_texture = load("res://assets/textures/puff.png")
+	material.albedo_color = color
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	material.vertex_color_use_as_albedo = true
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	quad.material = material
+	particles.draw_pass_1 = quad
+	particles.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(particles)
+	return particles
 
 
-func _burst(node: CPUParticles3D, pos: Vector3) -> void:
+func _make_debris() -> GPUParticles3D:
+	var particles := GPUParticles3D.new()
+	particles.name = "CrateDebris"
+	particles.amount = maxi(8, int(24.0 * Perf.particle_amount))
+	particles.lifetime = 1.25
+	particles.one_shot = true
+	particles.explosiveness = 1.0
+	particles.randomness = 0.85
+	particles.emitting = false
+	var process := _base_process(WOOD_COLOR, 7.0)
+	process.angular_velocity_min = -720.0
+	process.angular_velocity_max = 720.0
+	particles.process_material = process
+	var chip := BoxMesh.new()
+	chip.size = Vector3(0.08, 0.045, 0.24)
+	var wood := StandardMaterial3D.new()
+	wood.albedo_color = WOOD_COLOR
+	wood.roughness = 0.82
+	chip.material = wood
+	particles.draw_pass_1 = chip
+	add_child(particles)
+	return particles
+
+
+func _burst(node: GPUParticles3D, pos: Vector3) -> void:
 	node.global_position = pos
 	node.emitting = false
 	node.restart()
@@ -75,26 +98,35 @@ func land_dust(pos: Vector3) -> void:
 	_burst(_dust, Vector3(pos.x, 0.1, pos.z))
 
 
+func slide_dust(pos: Vector3) -> void:
+	_burst(_dust, Vector3(pos.x, 0.14, pos.z + 0.35))
+
+
 func pickup_sparkle(pos: Vector3) -> void:
 	_burst(_sparkle, pos)
 
 
 func crash(pos: Vector3) -> void:
-	_burst(_dust, Vector3(pos.x, 0.5, pos.z + 0.4))
-	_burst(_sparkle, Vector3(pos.x, 0.9, pos.z + 0.4))
+	_burst(_dust, Vector3(pos.x, 0.45, pos.z + 0.35))
+	_burst(_sparkle, Vector3(pos.x, 0.9, pos.z + 0.35))
+
+
+func crate_debris(pos: Vector3) -> void:
+	_burst(_debris, pos + Vector3(0, 0.65, 0))
+	_burst(_dust, pos + Vector3(0, 0.2, 0))
 
 
 func celebrate(pos: Vector3) -> void:
-	var mat: StandardMaterial3D = _materials.get(_confetti)
-	if mat:
-		mat.albedo_color = CONFETTI[randi() % CONFETTI.size()]
+	var process := _confetti.process_material as ParticleProcessMaterial
+	if process:
+		process.color = CONFETTI[randi() % CONFETTI.size()]
 	_burst(_confetti, pos + Vector3(0, 1.6, 0))
 
 
 func apply_quality() -> void:
-	for p in [_dust, _sparkle, _confetti]:
-		if p == null:
-			continue
-		var base := 14.0 if p == _dust else (10.0 if p == _sparkle else 26.0)
-		p.amount = maxi(4, int(base * maxf(Perf.particle_amount, 0.35)))
-		p.emitting = false
+	_dust.amount = maxi(5, int(20.0 * Perf.particle_amount))
+	_sparkle.amount = maxi(5, int(18.0 * Perf.particle_amount))
+	_debris.amount = maxi(8, int(24.0 * Perf.particle_amount))
+	_confetti.amount = maxi(8, int(34.0 * Perf.particle_amount))
+	for particles in [_dust, _sparkle, _debris, _confetti]:
+		particles.emitting = false

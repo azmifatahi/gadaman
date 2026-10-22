@@ -21,6 +21,7 @@ extends RefCounted
 static var _mat_vertex: StandardMaterial3D
 static var _mat_vertex_cheap: StandardMaterial3D
 static var _mat_road: StandardMaterial3D
+static var _mat_concrete: StandardMaterial3D
 static var _mat_sand: StandardMaterial3D
 static var _mat_glass: StandardMaterial3D
 static var _mat_emissive: Dictionary = {}
@@ -200,12 +201,29 @@ static func road_material() -> StandardMaterial3D:
 		var m := StandardMaterial3D.new()
 		m.albedo_texture = load("res://assets/textures/asphalt.png")
 		m.uv1_scale = Vector3(4.0, 26.0, 1.0)
-		m.roughness = 1.0
-		m.metallic = 0.0
+		m.roughness = 0.78
+		m.roughness_texture = load("res://assets/textures/asphalt_roughness.png")
+		m.normal_enabled = Perf.tier != Perf.Tier.LOW
+		m.normal_texture = load("res://assets/textures/asphalt_normal.png")
+		m.normal_scale = 0.65
+		m.metallic = 0.04
 		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		_mat_road = m
 	return _mat_road
+
+
+static func concrete_material() -> StandardMaterial3D:
+	if _mat_concrete == null:
+		var m := StandardMaterial3D.new()
+		m.albedo_texture = load("res://assets/textures/concrete_pavers.png")
+		m.uv1_scale = Vector3(5.0, 18.0, 1.0)
+		m.roughness = 0.88
+		m.metallic = 0.0
+		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_mat_concrete = m
+	return _mat_concrete
 
 
 static func sand_material() -> StandardMaterial3D:

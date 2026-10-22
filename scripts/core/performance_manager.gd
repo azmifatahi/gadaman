@@ -45,6 +45,9 @@ var prop_density: float = 1.0
 var particle_amount: float = 1.0
 var draw_distance: float = 230.0
 var msaa: int = Viewport.MSAA_DISABLED
+var lod_bias: float = 1.0
+var use_pbr_materials := true
+var post_effects_enabled := false
 
 var _elapsed := 0.0
 var _fps_accum := 0.0
@@ -183,6 +186,9 @@ func apply_preset(preset: int) -> void:
 			particle_amount = 0.45
 			draw_distance = 150.0
 			msaa = Viewport.MSAA_DISABLED
+			lod_bias = 0.65
+			use_pbr_materials = false
+			post_effects_enabled = false
 			_base_render_scale = 0.78
 		Tier.MEDIUM:
 			shadows_enabled = true
@@ -195,6 +201,9 @@ func apply_preset(preset: int) -> void:
 			particle_amount = 0.8
 			draw_distance = 215.0
 			msaa = Viewport.MSAA_DISABLED
+			lod_bias = 0.9
+			use_pbr_materials = true
+			post_effects_enabled = false
 			_base_render_scale = 0.92
 		Tier.HIGH:
 			shadows_enabled = true
@@ -207,6 +216,11 @@ func apply_preset(preset: int) -> void:
 			particle_amount = 1.0
 			draw_distance = 280.0
 			msaa = Viewport.MSAA_2X
+			lod_bias = 1.25
+			use_pbr_materials = true
+			# Applied only when the project uses Mobile/Forward+; Compatibility
+			# intentionally retains emissive bloom and baked AO fallbacks.
+			post_effects_enabled = RenderingServer.get_current_rendering_method() != "gl_compatibility"
 			_base_render_scale = 1.0
 
 	render_scale = _base_render_scale
@@ -276,8 +290,9 @@ func apply_to_environment(env: Environment) -> void:
 	env.fog_aerial_perspective = 0.0 if tier == Tier.LOW else 0.4
 	# The Compatibility renderer has no glow / SSAO passes: bloom is faked by the
 	# emissive materials (cups, lamps) instead, which is free on mobile.
-	env.glow_enabled = false
-	env.ssao_enabled = false
+	env.glow_enabled = post_effects_enabled
+	env.glow_intensity = 0.55 if post_effects_enabled else 0.0
+	env.ssao_enabled = post_effects_enabled
 	env.adjustment_enabled = tier == Tier.HIGH
 	env.adjustment_saturation = 1.06
 	env.adjustment_contrast = 1.02

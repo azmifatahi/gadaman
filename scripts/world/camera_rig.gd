@@ -18,6 +18,8 @@ var _shake := 0.0
 var _shake_time := 0.0
 var _base_fov := 62.0
 var _current_x := 0.0
+var _roll := 0.0
+var _action_boost := 0.0
 
 
 func _ready() -> void:
@@ -31,6 +33,10 @@ func _ready() -> void:
 func setup(player: Node3D, track_manager: TrackManager) -> void:
 	target = player
 	track = track_manager
+
+
+func set_action_intensity(value: float) -> void:
+	_action_boost = clampf(value, 0.0, 1.0)
 
 
 func shake(amount: float = 0.35, duration: float = 0.35) -> void:
@@ -59,9 +65,14 @@ func _process(delta: float) -> void:
 
 	var look_point := Vector3(px * 0.55, LOOK_HEIGHT + py * 0.45, LOOK_AHEAD)
 	look_at(look_point, Vector3.UP)
+	# Banking follows actual velocity, so rapid swipes feel cinematic without
+	# moving the collision camera far enough to cause motion sickness.
+	var lateral_speed: float = target.lateral_velocity if target is PlayerController else 0.0
+	_roll = lerp(_roll, clampf(-lateral_speed * 0.018, -0.075, 0.075), 1.0 - exp(-delta * 9.0))
+	rotation.z += _roll
 
 	# Speed widens the lens a touch; it is the cheapest "sense of speed" there is.
-	var target_fov := _base_fov + clampf((speed - 11.0) * 0.55, 0.0, 6.0)
+	var target_fov := _base_fov + clampf((speed - 11.0) * 0.55, 0.0, 6.0) + _action_boost * 4.0
 	fov = lerp(fov, target_fov, 1.0 - exp(-delta * 3.0))
 
 	if _shake_time > 0.0:

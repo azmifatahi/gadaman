@@ -18,10 +18,19 @@ signal jumped
 signal landed
 signal slide_started
 signal crashed
+signal stumbled
+signal recovered
+signal obstacle_smashed
+signal action_intensity_changed(value: float)
 
 const LANE_WIDTH := 2.4
 const LANE_COUNT := 3
-const LANE_CHANGE_TIME := 0.16
+const LANE_CHANGE_TIME := 0.20
+const LATERAL_ACCELERATION := 115.0
+const LATERAL_DAMPING := 16.0
+const STUMBLE_TIME := 0.85
+const RECOVERY_INVULNERABILITY := 1.15
+const SMASH_MIN_SPEED := 18.0
 const JUMP_VELOCITY := 12.6
 const GRAVITY := 38.0
 const SLIDE_TIME := 0.62
@@ -36,6 +45,10 @@ var is_sliding: bool = false
 var is_airborne: bool = false
 var alive: bool = true
 var controlling: bool = false
+var is_stumbling: bool = false
+var lateral_velocity: float = 0.0
+var run_blend: float = 0.0
+var lane_blend: float = 0.0
 var track: TrackManager
 
 var _slide_timer := 0.0
@@ -45,6 +58,9 @@ var _touch_start := Vector2.ZERO
 var _touch_consumed := false
 var _tilt_baseline := 0.0
 var _tilt_cooldown := 0.0
+var _stumble_timer := 0.0
+var _invulnerability_timer := 0.0
+var _last_intensity := -1.0
 var _model: RunnerModel
 var _blob: MeshInstance3D
 
@@ -84,13 +100,17 @@ func reset() -> void:
 	target_x = 0.0
 	position = Vector3(0, 0, 0)
 	velocity_y = 0.0
+	lateral_velocity = 0.0
 	is_sliding = false
 	is_airborne = false
+	is_stumbling = false
 	alive = true
 	controlling = true
 	_slide_timer = 0.0
 	_jump_buffer = 0.0
 	_tilt_cooldown = 0.0
+	_stumble_timer = 0.0
+	_invulnerability_timer = 0.0
 	rotation = Vector3.ZERO
 	if _model:
 		_model.set_state(RunnerModel.State.RUN)
@@ -119,7 +139,35 @@ func stop() -> void:
 
 
 func is_controllable() -> bool:
-	return controlling and alive
+	return controlling and alive and not is_stumbling
+
+
+func can_take_hit() -> bool:
+	return alive and _invulnerability_timer <= 0.0
+
+
+func can_smash_soft_obstacle() -> bool:
+	return is_controllable() and not is_airborne and not is_sliding and track != null and track.speed >= SMASH_MIN_SPEED
+
+
+## Minor impacts are recoverable, like classic cinematic action runners.
+func stumble() -> void:
+	if not can_take_hit():
+		return
+	is_stumbling = true
+	is_sliding = false
+	_stumble_timer = STUMBLE_TIME
+	_invulnerability_timer = STUMBLE_TIME + RECOVERY_INVULNERABILITY
+	lateral_velocity *= 0.25
+	if _model:
+		_model.set_state(RunnerModel.State.STUMBLE)
+	stumbled.emit()
+	Settings.vibrate(35)
+
+
+func smash() -> void:
+	obstacle_smashed.emit()
+	Settings.vibrate(18)
 
 
 func lane_x(index: int) -> float:
@@ -132,22 +180,41 @@ func lane_x(index: int) -> float:
 func _physics_process(delta: float) -> void:
 	if not alive:
 		return
+	_invulnerability_timer = maxf(0.0, _invulnerability_timer - delta)
+	if is_stumbling:
+		_stumble_timer -= delta
+		if _stumble_timer <= 0.0:
+			is_stumbling = false
+			if _model:
+				_model.set_state(RunnerModel.State.RUN)
+			recovered.emit()
 	_update_lateral(delta)
 	_update_vertical(delta)
 	_update_tilt(delta)
 	if _model:
 		var spd: float = track.speed if track else 11.0
+		run_blend = move_toward(run_blend, clampf((spd - 9.0) / 18.0, 0.0, 1.0), delta * 2.8)
 		_model.animate(delta, spd, is_sliding, is_airborne)
+	var intensity := clampf((spd - 11.0) / 16.0, 0.0, 1.0)
+	if absf(intensity - _last_intensity) > 0.025:
+		_last_intensity = intensity
+		action_intensity_changed.emit(intensity)
 
 
 func _update_lateral(delta: float) -> void:
 	target_x = lane_x(lane)
-	# Exponential smoothing, frame-rate independent. tau = half the lane time.
-	var t := 1.0 - exp(-delta / (LANE_CHANGE_TIME * 0.5))
-	position.x = lerp(position.x, target_x, t)
-	# Body lean sells the lane change (the model, not the collision point).
+	# Critically damped velocity steering. Unlike position lerp this preserves
+	# momentum through a lane change and gives animation/camera a useful velocity.
+	var error := target_x - position.x
+	lateral_velocity += error * LATERAL_ACCELERATION * delta
+	lateral_velocity *= exp(-LATERAL_DAMPING * delta)
+	position.x += lateral_velocity * delta
+	if absf(error) < 0.008 and absf(lateral_velocity) < 0.04:
+		position.x = target_x
+		lateral_velocity = 0.0
+	lane_blend = lerp(lane_blend, clampf(lateral_velocity / 8.0, -1.0, 1.0), 1.0 - exp(-delta * 12.0))
 	if _model:
-		_model.lean = clampf((target_x - position.x) * 0.55, -0.35, 0.35)
+		_model.lean = lane_blend * 0.34
 
 
 func _update_vertical(delta: float) -> void:

@@ -7,7 +7,7 @@
 class_name RunnerModel
 extends Node3D
 
-enum State { IDLE, RUN, CRASH }
+enum State { IDLE, RUN, STUMBLE, CRASH }
 
 const HIP_Y := 0.78
 const SHOULDER_Y := 1.34
@@ -53,14 +53,21 @@ static func _build_materials() -> void:
 	if _mat_flag == null:
 		var m := StandardMaterial3D.new()
 		m.albedo_texture = flag_tex
-		m.roughness = 0.72
-		m.metallic = 0.0
+		m.roughness = 0.2
+		m.metallic = 0.8
+		m.normal_enabled = true
+		m.normal_texture = load("res://assets/textures/suit_seams_normal.png")
+		m.normal_scale = 0.42
 		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 		_mat_flag = m
 	if _mat_flag_double == null:
 		var m2 := StandardMaterial3D.new()
 		m2.albedo_texture = load("res://assets/textures/flag_stripes.png")
-		m2.roughness = 0.8
+		m2.roughness = 0.2
+		m2.metallic = 0.8
+		m2.normal_enabled = true
+		m2.normal_texture = load("res://assets/textures/suit_seams_normal.png")
+		m2.normal_scale = 0.42
 		m2.cull_mode = BaseMaterial3D.CULL_DISABLED
 		_mat_flag_double = m2
 	if _mat_skin == null:
@@ -118,14 +125,49 @@ func _box(parent: Node3D, size: Vector3, pos: Vector3, mat: Material,
 	return mi
 
 
+func _capsule(parent: Node3D, radius: float, height: float, pos: Vector3,
+		mat: Material, name_hint: String) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var mesh := CapsuleMesh.new()
+	mesh.radius = radius
+	mesh.height = maxf(height, radius * 2.05)
+	mesh.radial_segments = 20 if Perf.tier == Perf.Tier.HIGH else 12
+	mesh.rings = 8 if Perf.tier == Perf.Tier.HIGH else 5
+	mi.mesh = mesh
+	mi.material_override = mat
+	mi.position = pos
+	mi.name = name_hint
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	parent.add_child(mi)
+	return mi
+
+
+func _sphere(parent: Node3D, radius: float, pos: Vector3,
+		mat: Material, name_hint: String) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var mesh := SphereMesh.new()
+	mesh.radius = radius
+	mesh.height = radius * 2.0
+	mesh.radial_segments = 20 if Perf.tier == Perf.Tier.HIGH else 12
+	mesh.rings = 10 if Perf.tier == Perf.Tier.HIGH else 6
+	mi.mesh = mesh
+	mi.material_override = mat
+	mi.position = pos
+	mi.name = name_hint
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	parent.add_child(mi)
+	return mi
+
+
 func _build_body() -> void:
 	_root = Node3D.new()
 	_root.name = "Root"
 	add_child(_root)
 
 	# Torso wrapped in the flag: box UVs map the flag onto every face.
-	_torso = _box(_root, Vector3(0.54, 0.62, 0.32), Vector3(0, 1.08, 0),
+	_torso = _capsule(_root, 0.29, 0.68, Vector3(0, 1.08, 0),
 			_mat_flag_double, "Torso")
+	_torso.scale = Vector3(1.08, 1.0, 0.68)
 	# Chest chevron: the green hoist triangle of the flag, worn as a badge. On the
 	# back the suit reads as three clean bands, which looks intentional from the
 	# chase camera instead of like a random green blob.
@@ -148,13 +190,13 @@ func _build_body() -> void:
 	_head.name = "Head"
 	_head.position = Vector3(0, 1.44, 0)
 	_root.add_child(_head)
-	_box(_head, Vector3(0.32, 0.32, 0.3), Vector3(0, 0.16, 0), _mat_skin, "Skull")
+	_sphere(_head, 0.18, Vector3(0, 0.16, 0), _mat_skin, "Skull")
 	_box(_head, Vector3(0.34, 0.07, 0.32), Vector3(0, 0.29, 0), _mat_gold, "Band")
 	_box(_head, Vector3(0.09, 0.05, 0.02), Vector3(-0.08, 0.18, -0.151), _mat_dark, "EyeL")
 	_box(_head, Vector3(0.09, 0.05, 0.02), Vector3(0.08, 0.18, -0.151), _mat_dark, "EyeR")
 	_box(_head, Vector3(0.2, 0.03, 0.02), Vector3(0, 0.09, -0.151), _mat_dark, "Mouth")
 	# Neck.
-	_box(_root, Vector3(0.14, 0.12, 0.14), Vector3(0, 1.32, 0), _mat_skin, "Neck")
+	_capsule(_root, 0.075, 0.17, Vector3(0, 1.32, 0), _mat_skin, "Neck")
 
 	# Arms: pivot at the shoulder so rotation.x swings the whole limb.
 	_arm_l = _limb(Vector3(-0.35, SHOULDER_Y, 0), Vector3(0.14, 0.46, 0.14),
@@ -193,10 +235,11 @@ func _limb(pivot: Vector3, size: Vector3, upper_mat: Material, end_mat: Material
 	node.name = name_hint
 	node.position = pivot
 	_root.add_child(node)
-	var upper := _box(node, size, Vector3(0, -size.y * 0.5, 0), upper_mat, "Upper")
+	var radius := maxf(size.x, size.z) * 0.5
+	var upper := _capsule(node, radius, size.y, Vector3(0, -size.y * 0.5, 0), upper_mat, "Upper")
 	upper.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	_box(node, size * Vector3(1.05, 0.35, 1.1), Vector3(0, -size.y - 0.02, -0.02),
-			end_mat, "End")
+	_capsule(node, radius * 1.04, maxf(size.y * 0.38, radius * 2.05),
+			Vector3(0, -size.y - 0.03, -0.02), end_mat, "End")
 	return node
 
 
@@ -229,6 +272,9 @@ func animate(delta: float, speed: float, sliding: bool, airborne: bool) -> void:
 		return
 	if state == State.CRASH:
 		_animate_crash(delta)
+		return
+	if state == State.STUMBLE:
+		_animate_stumble(delta)
 		return
 
 	var target_pitch := 0.0
@@ -268,6 +314,19 @@ func animate(delta: float, speed: float, sliding: bool, airborne: bool) -> void:
 	_cape_swing = lerp(_cape_swing, 0.75 + speed * 0.028, blend)
 	_cape.rotation.x = -_cape_swing + sin(_cycle * 2.3) * 0.12
 	_cape.rotation.z = sin(_cycle * 1.7) * 0.06
+
+
+func _animate_stumble(delta: float) -> void:
+	_cycle += delta * 15.0
+	var blend := 1.0 - exp(-delta * 12.0)
+	_root.rotation.x = lerp(_root.rotation.x, -0.42 + sin(_cycle) * 0.12, blend)
+	_root.rotation.z = lerp(_root.rotation.z, sin(_cycle * 0.55) * 0.24, blend)
+	_root.position.y = lerp(_root.position.y, -0.08 + absf(sin(_cycle)) * 0.08, blend)
+	_arm_l.rotation.x = lerp(_arm_l.rotation.x, -1.45, blend)
+	_arm_r.rotation.x = lerp(_arm_r.rotation.x, -1.8, blend)
+	_leg_l.rotation.x = sin(_cycle) * 0.52
+	_leg_r.rotation.x = -sin(_cycle) * 0.52
+	_head.rotation.z = -_root.rotation.z * 0.55
 
 
 func _animate_crash(delta: float) -> void:

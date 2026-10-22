@@ -13,6 +13,13 @@ extends Node3D
 signal cup_collected(kind: int, at: Vector3)
 signal prop_hit(reason_key: String)
 signal speed_changed(speed: float)
+signal obstacle_smashed(at: Vector3)
+signal player_stumbled(reason_key: String)
+signal delivery_updated(time_left: float, distance_left: float)
+signal delivery_completed(kind: int, elapsed: float)
+signal delivery_failed
+
+enum RunMode { ENDLESS, DELIVERY }
 
 const LANE_COUNT := 3
 const LANE_WIDTH := 2.4
@@ -33,6 +40,11 @@ const START_CLEAR_DISTANCE := 34.0
 var speed := BASE_SPEED
 var distance := 0.0
 var running := false
+var run_mode: int = RunMode.ENDLESS
+var delivery_kind := PropLibrary.CUP_KARKADEH
+var delivery_distance := 0.0
+var delivery_time_limit := 0.0
+var delivery_time_left := 0.0
 var player: PlayerController
 
 var _segments: Array[TrackSegment] = []
@@ -45,6 +57,7 @@ var _cup_cursor := 0
 var _spawn_cursor := 0.0
 var _row_index := 0
 var _last_kind := -1
+var _speed_penalty := 0.0
 var _rng := RandomNumberGenerator.new()
 var _segments_root: Node3D
 var _objects_root: Node3D
@@ -98,11 +111,28 @@ func lane_x(lane: int) -> float:
 # Run control
 # ---------------------------------------------------------------------------
 func start_run() -> void:
+	run_mode = RunMode.ENDLESS
+	_begin_run()
+
+
+## Starts a finite delivery stage. UI/mission selection can call this instead
+## of start_run without creating another track implementation.
+func start_delivery(kind: int, target_distance: float = 850.0, time_limit: float = 72.0) -> void:
+	run_mode = RunMode.DELIVERY
+	delivery_kind = clampi(kind, 0, 2)
+	delivery_distance = maxf(target_distance, 100.0)
+	delivery_time_limit = maxf(time_limit, 10.0)
+	delivery_time_left = delivery_time_limit
+	_begin_run()
+
+
+func _begin_run() -> void:
 	reset_world()
 	speed = BASE_SPEED
 	distance = 0.0
 	_rng.randomize()
 	_row_index = 0
+	_speed_penalty = 0.0
 	_spawn_cursor = -START_CLEAR_DISTANCE
 	running = true
 	# Fill the whole visible corridor before the first frame of gameplay.
@@ -139,7 +169,8 @@ func _process(delta: float) -> void:
 		return
 
 	# 1. speed ramp: the run gets faster the further you go, asymptotically.
-	speed = minf(MAX_SPEED, BASE_SPEED + distance * SPEED_PER_METER)
+	_speed_penalty = move_toward(_speed_penalty, 0.0, delta * 1.8)
+	speed = maxf(BASE_SPEED, minf(MAX_SPEED, BASE_SPEED + distance * SPEED_PER_METER) - _speed_penalty)
 	var travel := speed * delta
 	distance += travel
 	Game.add_distance(travel)
@@ -158,6 +189,23 @@ func _process(delta: float) -> void:
 	# 4. gameplay
 	_check_pickups()
 	_check_obstacles()
+	_update_delivery(delta)
+
+
+func _update_delivery(delta: float) -> void:
+	if run_mode != RunMode.DELIVERY or not running:
+		return
+	delivery_time_left = maxf(0.0, delivery_time_left - delta)
+	var left := maxf(0.0, delivery_distance - distance)
+	delivery_updated.emit(delivery_time_left, left)
+	if left <= 0.0:
+		running = false
+		Game.bonus(maxi(250, int(delivery_time_left * 20.0)))
+		delivery_completed.emit(delivery_kind, delivery_time_limit - delivery_time_left)
+	elif delivery_time_left <= 0.0:
+		running = false
+		delivery_failed.emit()
+		Game.end_run("delivery.timeout")
 
 
 func _scroll_segments(travel: float) -> void:
@@ -347,7 +395,30 @@ func _check_obstacles() -> void:
 			continue
 		if prop.is_passed_by(feet, sliding):
 			continue
-		# Same lane, same z, wrong pose: crash.
+		# Recovery grace prevents one obstacle from immediately escalating to death.
+		if not player.can_take_hit():
+			continue
+		# Cardboard/wooden cargo becomes a chest-bump set-piece at sprint speed.
+		if prop.kind == PropLibrary.CRATES and player.can_smash_soft_obstacle():
+			var hit_pos := prop.global_position
+			var idx := _active_props.find(prop)
+			if idx != -1:
+				_release_prop(prop, idx)
+			player.smash()
+			Game.bonus(35)
+			obstacle_smashed.emit(hit_pos)
+			return
+		# Small mistakes cost momentum and trigger a recovery, not the whole run.
+		if prop.kind in [PropLibrary.BARRIER, PropLibrary.POTHOLE] and player.can_take_hit():
+			var reason := prop.reason_key()
+			var idx := _active_props.find(prop)
+			if idx != -1:
+				_release_prop(prop, idx)
+			player.stumble()
+			_speed_penalty = maxf(_speed_penalty, 4.5)
+			speed = maxf(BASE_SPEED, speed - _speed_penalty)
+			player_stumbled.emit(reason)
+			return
 		_trigger_hit(prop)
 		return
 
