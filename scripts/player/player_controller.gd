@@ -11,6 +11,13 @@
 ##
 ## Input is deliberately engine-agnostic: swipes, mouse drags, keys and the
 ## optional accelerometer all funnel into the same three verbs.
+##
+## This controller supports two visual back-ends:
+##   1. The imported Mixamo hero (res://assets/models/hero/hero.tscn) — uses an
+##      AnimationTree with run_blend/lane_blend and one-shots driven by
+##      PlayerAnimationHandler.
+##   2. The legacy procedural RunnerModel — used as a graceful fallback if the
+##      hero scene hasn't been imported yet (e.g. in CI headless runs).
 class_name PlayerController
 extends Node3D
 
@@ -38,6 +45,8 @@ const SWIPE_THRESHOLD := 46.0     # logical pixels
 const TILT_THRESHOLD := 0.22
 const TILT_COOLDOWN := 0.32
 
+const HERO_SCENE_PATH := "res://assets/models/hero/hero.tscn"
+
 var lane: int = 1
 var target_x: float = 0.0
 var velocity_y: float = 0.0
@@ -61,17 +70,78 @@ var _tilt_cooldown := 0.0
 var _stumble_timer := 0.0
 var _invulnerability_timer := 0.0
 var _last_intensity := -1.0
+
+# Visual back-end references. Either _procedural (RunnerModel) is populated or
+# _hero + _anim_player + _anim_tree + _anim_handler are; both paths work.
 var _model: RunnerModel
+var _hero: Node3D
+var _anim_player: AnimationPlayer
+var _anim_tree: AnimationTree
+var _anim_handler: Node
 var _blob: MeshInstance3D
+var _using_imported_hero: bool = false
 
 
 func _ready() -> void:
 	position = Vector3(0, 0, 0)
+	_attach_model()
+	_build_blob_shadow()
+	_attach_animation_handler()
+	_connect_signals_to_animator()
+	reset()
+
+
+func _attach_model() -> void:
+	# Prefer the imported hero scene; fall back to the procedural model if
+	# the hero scene doesn't exist (CI, first checkout before running the
+	# import tool).
+	if ResourceLoader.exists(HERO_SCENE_PATH):
+		var hero_scene: PackedScene = load(HERO_SCENE_PATH)
+		if hero_scene:
+			_hero = hero_scene.instantiate()
+			_hero.name = "Model"
+			add_child(_hero)
+			_anim_player = _hero.get_node_or_null("AnimationPlayer") as AnimationPlayer
+			_anim_tree = _hero.get_node_or_null("AnimationTree") as AnimationTree
+			_using_imported_hero = true
+			# Make sure the tree is active.
+			if _anim_tree:
+				_anim_tree.active = true
+			return
+	# Fallback: procedural model.
 	_model = RunnerModel.new()
 	_model.name = "Model"
 	add_child(_model)
-	_build_blob_shadow()
-	reset()
+	_using_imported_hero = false
+
+
+func _attach_animation_handler() -> void:
+	if not _using_imported_hero:
+		return
+	if not ResourceLoader.exists("res://scripts/player/player_animation_handler.gd"):
+		return
+	if has_node("AnimationHandler"):
+		_anim_handler = get_node("AnimationHandler")
+	else:
+		var script := load("res://scripts/player/player_animation_handler.gd")
+		if script:
+			_anim_handler = Node.new()
+			_anim_handler.name = "AnimationHandler"
+			_anim_handler.set_script(script)
+			add_child(_anim_handler)
+	if _anim_handler and _anim_handler.has_method("bind_player"):
+		_anim_handler.bind_player(self)
+
+
+func _connect_signals_to_animator() -> void:
+	# Use callables so any signal wiring stays local to the controller and
+	# both the procedural RunnerModel and the imported AnimationHandler work.
+	jumped.connect(func(): _fire_anim("jump"))
+	landed.connect(func(): _fire_anim("land"))
+	slide_started.connect(func(): _fire_anim("slide"))
+	stumbled.connect(func(): _fire_anim("stumble"))
+	crashed.connect(func(): _fire_anim("crash"))
+	recovered.connect(func(): _fire_anim("recover"))
 
 
 func _build_blob_shadow() -> void:
@@ -115,6 +185,13 @@ func reset() -> void:
 	if _model:
 		_model.set_state(RunnerModel.State.RUN)
 		_model.reset_pose()
+	if _using_imported_hero and _anim_player:
+		if _anim_player.has_animation("idle"):
+			_anim_player.play("idle")
+		elif _anim_player.has_animation("jog"):
+			_anim_player.play("jog")
+	if _anim_tree:
+		_reset_tree_oneshots()
 	if _blob:
 		_blob.visible = true
 	if Settings.tilt_enabled:
@@ -167,6 +244,7 @@ func stumble() -> void:
 
 func smash() -> void:
 	obstacle_smashed.emit()
+	_fire_anim("smash")
 	Settings.vibrate(18)
 
 
@@ -192,19 +270,92 @@ func _physics_process(delta: float) -> void:
 	_update_vertical(delta)
 	_update_tilt(delta)
 	var spd: float = track.speed if track else 11.0
+	run_blend = move_toward(run_blend, clampf((spd - 9.0) / 18.0, 0.0, 1.0), delta * 2.8)
 	if _model:
-		run_blend = move_toward(run_blend, clampf((spd - 9.0) / 18.0, 0.0, 1.0), delta * 2.8)
 		_model.animate(delta, spd, is_sliding, is_airborne)
+	# Drive the imported AnimationTree.
+	if _anim_tree:
+		_drive_anim_tree(delta, spd)
+	elif _anim_handler and _anim_handler.has_method("tick"):
+		_anim_handler.tick(delta, is_sliding, is_airborne, is_stumbling)
 	var intensity := clampf((spd - 11.0) / 16.0, 0.0, 1.0)
 	if absf(intensity - _last_intensity) > 0.025:
 		_last_intensity = intensity
 		action_intensity_changed.emit(intensity)
 
 
+func _drive_anim_tree(_delta: float, _speed: float) -> void:
+	if _anim_tree == null:
+		return
+	# Locate the BlendSpace1D (run_blend) and the lane blend node inside the
+	# locomotion sub-tree. Paths are nested: parameters/locomotion/<inner>/<prop>.
+	# We search for the first BlendSpace1D-style blend_position and the first
+	# Blend2 amount parameter, which is robust against node renames.
+	var bs_path := _find_param("blend_position")
+	if bs_path != "":
+		_anim_tree.set(bs_path, run_blend)
+	var lean_path := _find_param("amount", "lean")
+	if lean_path != "":
+		_anim_tree.set(lean_path, clampf(lane_blend * 0.5, -1.0, 1.0))
+	# Tick the animation handler so it can state-machine travel.
+	if _anim_handler and _anim_handler.has_method("tick"):
+		_anim_handler.tick(_delta, is_sliding, is_airborne, is_stumbling)
+
+
+func _find_param(prop_suffix: String, node_name_hint: String = "") -> String:
+	if _anim_tree == null:
+		return ""
+	# Godot 4 exposes properties of nodes inside nested AnimationNodeStateMachine
+	# trees at paths like:
+	#   parameters/<state_machine>/playback                           (state machine)
+	#   parameters/<state>/<node_in_sub_blendtree>/<property>         (nested props)
+	# Our root is a StateMachine; the "locomotion" state holds a BlendTree with
+	# an inner BlendSpace1D also named "locomotion" and a Blend2 named "lean".
+	var candidates := [
+		"parameters/playback",
+		"parameters/locomotion/locomotion/" + prop_suffix,
+		"parameters/locomotion/lean/" + prop_suffix,
+		"parameters/locomotion/" + prop_suffix,
+		"parameters/" + prop_suffix,
+	]
+	if node_name_hint != "":
+		candidates.insert(0, "parameters/locomotion/%s/%s" % [node_name_hint, prop_suffix])
+		candidates.insert(0, "parameters/%s/%s" % [node_name_hint, prop_suffix])
+	for p in candidates:
+		if _prop_exists(_anim_tree, p):
+			return p
+	return ""
+
+
+func _prop_exists(obj: Object, path: String) -> bool:
+	# Safely probe whether an Object exposes a property path, without spamming
+	# the console with errors on miss.
+	var v = obj.get(path, _MISSING)
+	return v != _MISSING
+
+
+const _MISSING := "__missing__"
+
+
+func _reset_tree_oneshots() -> void:
+	# StateMachine-driven; nothing to reset – travel back to locomotion.
+	if _anim_handler and _anim_handler.has_method("fire"):
+		_anim_handler.fire("recover")
+
+
+func _fire_anim(name: String) -> void:
+	if _anim_handler and _anim_handler.has_method("fire"):
+		_anim_handler.fire(name)
+	if _anim_tree:
+		var path := "parameters/%s/active" % name
+		if _anim_tree.has_node(path):
+			_anim_tree.set(path, true)
+	elif _anim_player and _anim_player.has_animation(name):
+		_anim_player.play(name)
+
+
 func _update_lateral(delta: float) -> void:
 	target_x = lane_x(lane)
-	# Critically damped velocity steering. Unlike position lerp this preserves
-	# momentum through a lane change and gives animation/camera a useful velocity.
 	var error := target_x - position.x
 	lateral_velocity += error * LATERAL_ACCELERATION * delta
 	lateral_velocity *= exp(-LATERAL_DAMPING * delta)
@@ -227,14 +378,10 @@ func _update_vertical(delta: float) -> void:
 			is_airborne = false
 			landed.emit()
 			Settings.vibrate(12)
-
-	# Slide timer.
 	if is_sliding:
 		_slide_timer -= delta
 		if _slide_timer <= 0.0:
 			is_sliding = false
-
-	# Jump buffer: tapping jump slightly before landing still jumps.
 	if _jump_buffer > 0.0:
 		_jump_buffer -= delta
 		if not is_airborne:
@@ -297,7 +444,6 @@ func slide() -> void:
 	if not is_controllable():
 		return
 	if is_airborne:
-		# Slide on landing: drop fast, then duck.
 		velocity_y = minf(velocity_y, -18.0)
 		_jump_buffer = 0.0
 	_slide_timer = SLIDE_TIME
@@ -345,10 +491,6 @@ func _unhandled_input(event: InputEvent) -> void:
 				_touch_consumed = true
 				_resolve_swipe(delta)
 
-	# Note: mouse events are intentionally ignored. The project enables
-	# input_devices/pointing/emulate_touch_from_mouse, so desktop mice already
-	# arrive as InputEventScreenTouch/Drag and every platform shares one path.
-
 
 func _resolve_swipe(delta: Vector2) -> void:
 	if delta.length() < SWIPE_THRESHOLD:
@@ -364,7 +506,6 @@ func _resolve_swipe(delta: Vector2) -> void:
 func _process(_delta: float) -> void:
 	if not is_controllable():
 		return
-	# Keyboard / gamepad / editor testing.
 	if Input.is_action_just_pressed("move_left"):
 		change_lane(-1)
 	elif Input.is_action_just_pressed("move_right"):
@@ -373,3 +514,8 @@ func _process(_delta: float) -> void:
 		jump()
 	elif Input.is_action_just_pressed("slide"):
 		slide()
+
+
+func head_world_y() -> float:
+	# Slight difference depending on model.
+	return global_position.y + (1.6 if _using_imported_hero else 1.6)
