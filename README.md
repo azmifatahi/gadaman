@@ -7,6 +7,19 @@
 
 ![القائمة الرئيسية](assets/art/menu_bg.png)
 
+## 📸 من داخل اللعبة / Screenshots
+
+| اللعب / Gameplay | القفز / Jump |
+| --- | --- |
+| ![gameplay](docs/screenshots/shot_02_gameplay.png) | ![jump](docs/screenshots/shot_03_jump.png) |
+
+| القائمة / Menu | الإعدادات / Settings | نهاية الجولة / Game over |
+| --- | --- | --- |
+| ![menu](docs/screenshots/shot_01_menu.png) | ![settings](docs/screenshots/shot_07_settings.png) | ![gameover](docs/screenshots/shot_06_gameover.png) |
+
+> هذه الصور مُلتقطة آليًا من بناء الـ CI نفسه (`godot --screenshot` مع مُصيّر برمجي) — أي أنها تعكس ما ستراه على الجهاز تمامًا.
+> Captured automatically by CI from the real build on a software GL renderer.
+
 ---
 
 ## 1. ما داخل اللعبة / What is in the box
@@ -170,7 +183,8 @@ FFMPEG_BIN=$(which ffmpeg) python3 tools/generate_audio.py   # الموسيقى 
 1. **Validate** — فحص GDScript + استيراد المشروع + **اختبار لعب headless** (يبدأ جولة، يقفز، ينحني، يغيّر الحارات، ينهي الجولة، ويطبع `SMOKE_OK`).
 2. **Export APK** — يثبّت Android SDK (build-tools 34/35) ويصدّر APK موقّعًا بمفتاح التصحيح.
 
-للتحميل: افتح تبويب **Actions → آخر تشغيل ناجح → Artifacts → `sudan-runner-apk`**.
+للتحميل مباشرة (بدون تسجيل دخول):
+**[⬇️ أحدث APK](../../releases/latest/download/sudan-runner.apk)** — من صفحة الإصدار `latest-build`، أو من **Actions → آخر تشغيل → Artifacts → `sudan-runner-apk`**.
 ولإنشاء إصدار رسمي: أنشئ وسمًا مثل `v1.0.0`:
 
 ```bash
