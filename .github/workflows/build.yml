@@ -146,10 +146,25 @@ jobs:
           ls "$ANDROID_SDK_ROOT/build-tools" || true
           ls -la "$HOME/.android" || true
 
-      - name: Export debug APK
+      - name: Create CI signing key
+        run: |
+          # Throwaway key so the workflow needs no repository secret. Replace it
+          # with your own keystore (and keep it safe!) for Play Store updates.
+          keytool -genkeypair -v             -keystore ci-release.keystore             -alias gadaman             -keyalg RSA -keysize 2048 -validity 10000             -storepass gadaman -keypass gadaman             -dname "CN=Sudan Runner CI, O=Gadaman, C=SD"             -deststoretype pkcs12
+          ls -lh ci-release.keystore
+
+      - name: Export APK
+        env:
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: ${{ github.workspace }}/ci-release.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: gadaman
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: gadaman
         run: |
           mkdir -p build
-          godot --headless --export-debug "$EXPORT_NAME" build/sudan-runner.apk 2>&1 | tee export.log
+          godot --headless --export-release "$EXPORT_NAME" build/sudan-runner.apk 2>&1 | tee export.log || true
+          if [ ! -f build/sudan-runner.apk ]; then
+            echo "::warning::Release export failed - falling back to a debug-signed APK."
+            godot --headless --export-debug "$EXPORT_NAME" build/sudan-runner.apk 2>&1 | tee -a export.log || true
+          fi
           if [ ! -f build/sudan-runner.apk ]; then
             echo "::error::APK was not produced"
             # The actionable lines are the ones right after
