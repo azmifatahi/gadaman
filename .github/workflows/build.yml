@@ -48,13 +48,22 @@ jobs:
       - name: Headless gameplay smoke test
         run: |
           set -o pipefail
-          timeout 180 godot --headless --quit-after 1200 -- --smoke 2>&1 | tee smoke.log
+          timeout 180 godot --headless --quit-after 1200 -- --smoke 2>&1 | tee smoke.log || true
           echo "--- errors ---"
-          if grep -nE "SCRIPT ERROR|Parse Error|Invalid access|Invalid set|Cannot call" smoke.log; then
+          # Surface the offending lines as check annotations: artifacts are not
+          # always retrievable from the API, annotations always are.
+          grep -nE "SCRIPT ERROR|Parse Error|Invalid |Cannot |Attempt to |Trying to |Condition .* is " smoke.log \
+            | head -n 12 | while IFS= read -r line; do echo "::error::$line"; done
+          if grep -qE "SCRIPT ERROR|Parse Error|Invalid |Cannot |Attempt to " smoke.log; then
             echo "::error::Runtime errors detected in the headless run"
             exit 1
           fi
-          grep -q "SMOKE_OK" smoke.log && echo "Smoke test passed."
+          if ! grep -q "SMOKE_OK" smoke.log; then
+            echo "::error::Smoke test did not finish (no SMOKE_OK marker)."
+            tail -n 25 smoke.log | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
+          echo "Smoke test passed."
 
       - name: Upload smoke log
         if: always()
