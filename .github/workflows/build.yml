@@ -138,13 +138,23 @@ jobs:
       - name: Import project
         run: godot --headless --import 2>&1 | tail -n 20
 
+      - name: Diagnostics
+        run: |
+          godot --version
+          ls -la "$HOME/.local/share/godot/export_templates" || true
+          ls -la "$HOME/.config/godot" || true
+          ls "$ANDROID_SDK_ROOT/build-tools" || true
+          ls -la "$HOME/.android" || true
+
       - name: Export debug APK
         run: |
           mkdir -p build
           godot --headless --export-debug "$EXPORT_NAME" build/sudan-runner.apk 2>&1 | tee export.log
           if [ ! -f build/sudan-runner.apk ]; then
             echo "::error::APK was not produced"
-            tail -n 80 export.log
+            grep -nE "ERROR|Error|error|missing|Missing|not found|Invalid|invalid|Unable" export.log \
+              | tail -n 12 | while IFS= read -r line; do echo "::error::$line"; done
+            tail -n 6 export.log | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           fi
           ls -lh build
