@@ -137,7 +137,7 @@ static func _build_road(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
 
 static func _build_walkways(st: SurfaceTool) -> void:
 	var h := LENGTH * 0.5
-	var concrete := Color("#c4bba9")
+	var concrete := Color("#b8ac97")
 	var curb := Color("#b6ac9a")
 	for side: float in [-1.0, 1.0]:
 		var x_in := side * ROAD_HALF

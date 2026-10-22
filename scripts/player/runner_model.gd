@@ -34,6 +34,7 @@ static var _mat_gold: StandardMaterial3D
 static var _mat_dark: StandardMaterial3D
 static var _mat_red: StandardMaterial3D
 static var _mat_trousers: StandardMaterial3D
+static var _mat_green: StandardMaterial3D
 
 
 func _ready() -> void:
@@ -88,6 +89,11 @@ static func _build_materials() -> void:
 		r.albedo_color = Color("#d21034")
 		r.roughness = 0.8
 		_mat_red = r
+	if _mat_green == null:
+		var g2 := StandardMaterial3D.new()
+		g2.albedo_color = Color("#009a00")
+		g2.roughness = 0.75
+		_mat_green = g2
 	if _mat_trousers == null:
 		var t := StandardMaterial3D.new()
 		t.albedo_color = Color("#efe9dc")
@@ -119,7 +125,19 @@ func _build_body() -> void:
 
 	# Torso wrapped in the flag: box UVs map the flag onto every face.
 	_torso = _box(_root, Vector3(0.54, 0.62, 0.32), Vector3(0, 1.08, 0),
-			_mat_flag, "Torso")
+			_mat_flag_double, "Torso")
+	# Chest chevron: the green hoist triangle of the flag, worn as a badge. On the
+	# back the suit reads as three clean bands, which looks intentional from the
+	# chase camera instead of like a random green blob.
+	var chevron := MeshInstance3D.new()
+	var prism := PrismMesh.new()
+	prism.size = Vector3(0.34, 0.3, 0.02)
+	chevron.mesh = prism
+	chevron.material_override = _mat_green
+	chevron.position = Vector3(0, 1.12, -0.17)
+	chevron.rotation = Vector3(0, 0, PI)
+	chevron.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_root.add_child(chevron)
 	# Hips / shorts.
 	_box(_root, Vector3(0.5, 0.22, 0.3), Vector3(0, HIP_Y, 0), _mat_dark, "Hips")
 	# Chest strap for a bit of tailoring.

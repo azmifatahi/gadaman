@@ -178,7 +178,7 @@ func apply_preset(preset: int) -> void:
 			fog_density = 0.020
 			fog_depth_begin = 24.0
 			fog_depth_end = 118.0
-			fog_color = Color(0.66, 0.55, 0.50)
+			fog_color = Color(0.83, 0.62, 0.47)
 			prop_density = 0.55
 			particle_amount = 0.45
 			draw_distance = 150.0
@@ -190,7 +190,7 @@ func apply_preset(preset: int) -> void:
 			fog_density = 0.012
 			fog_depth_begin = 50.0
 			fog_depth_end = 195.0
-			fog_color = Color(0.60, 0.53, 0.58)
+			fog_color = Color(0.80, 0.61, 0.49)
 			prop_density = 1.0
 			particle_amount = 0.8
 			draw_distance = 215.0
@@ -202,7 +202,7 @@ func apply_preset(preset: int) -> void:
 			fog_density = 0.0075
 			fog_depth_begin = 85.0
 			fog_depth_end = 250.0
-			fog_color = Color(0.56, 0.51, 0.60)
+			fog_color = Color(0.76, 0.60, 0.51)
 			prop_density = 1.35
 			particle_amount = 1.0
 			draw_distance = 280.0
@@ -269,9 +269,10 @@ func apply_to_environment(env: Environment) -> void:
 		return
 	env.fog_enabled = true
 	env.fog_light_color = fog_color
-	env.fog_light_energy = 0.8
+	env.fog_light_energy = 1.0
 	env.fog_density = fog_density
-	env.fog_sky_affect = 0.35
+	# Full sky affect fuses the skyline into the same haze: no horizon seam.
+	env.fog_sky_affect = 0.85
 	env.fog_aerial_perspective = 0.0 if tier == Tier.LOW else 0.4
 	# The Compatibility renderer has no glow / SSAO passes: bloom is faked by the
 	# emissive materials (cups, lamps) instead, which is free on mobile.
