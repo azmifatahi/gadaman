@@ -11,11 +11,15 @@
 
 | اللعب / Gameplay | القفز / Jump |
 | --- | --- |
-| ![gameplay](docs/screenshots/shot_02_gameplay.png) | ![jump](docs/screenshots/shot_03_jump.png) |
+| ![gameplay](docs/screenshots/shot_03_gameplay.png) | ![jump](docs/screenshots/shot_04_jump.png) |
 
 | القائمة / Menu | الإعدادات / Settings | نهاية الجولة / Game over |
 | --- | --- | --- |
-| ![menu](docs/screenshots/shot_01_menu.png) | ![settings](docs/screenshots/shot_07_settings.png) | ![gameover](docs/screenshots/shot_06_gameover.png) |
+| ![menu](docs/screenshots/shot_01_menu.png) | ![settings](docs/screenshots/shot_08_settings.png) | ![gameover](docs/screenshots/shot_07_gameover.png) |
+
+| الانحناء / Slide | طريقة اللعب / How to play | إيقاف مؤقت / Pause |
+| --- | --- | --- |
+| ![slide](docs/screenshots/shot_05_slide.png) | ![howto](docs/screenshots/shot_02_howto.png) | ![pause](docs/screenshots/shot_06_pause.png) |
 
 > هذه الصور مُلتقطة آليًا من بناء الـ CI نفسه (`godot --screenshot` مع مُصيّر برمجي) — أي أنها تعكس ما ستراه على الجهاز تمامًا.
 > Captured automatically by CI from the real build on a software GL renderer.
