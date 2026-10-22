@@ -37,6 +37,8 @@ func _ready() -> void:
 
 	if "--smoke" in OS.get_cmdline_user_args():
 		_run_smoke_test()
+	if "--screenshot" in OS.get_cmdline_user_args():
+		_run_screenshot_session()
 
 
 # ---------------------------------------------------------------------------
@@ -183,3 +185,45 @@ func _run_smoke_test() -> void:
 		Game.score, int(Game.distance), Game.cups, track.active_prop_count(),
 		track.active_cup_count(), Engine.get_frames_per_second()])
 	get_tree().quit()
+
+
+# ---------------------------------------------------------------------------
+# Screenshot session (CI visual check):
+#   xvfb-run godot --rendering-driver opengl3 -- --screenshot
+# Saves PNGs to user:// so the workflow can publish them for review.
+# ---------------------------------------------------------------------------
+func _run_screenshot_session() -> void:
+	await get_tree().create_timer(1.2).timeout
+	await _save_shot("01_menu")
+	_on_play_requested()
+	await get_tree().create_timer(2.2).timeout
+	await _save_shot("02_gameplay")
+	player.jump()
+	await get_tree().create_timer(0.34).timeout
+	await _save_shot("03_jump")
+	await get_tree().create_timer(1.1).timeout
+	player.slide()
+	await get_tree().create_timer(0.2).timeout
+	await _save_shot("04_slide")
+	await get_tree().create_timer(0.8).timeout
+	Game.toggle_pause()
+	await get_tree().create_timer(0.5).timeout
+	await _save_shot("05_pause")
+	Game.toggle_pause()
+	await get_tree().create_timer(0.2).timeout
+	Game.end_run("screenshot")
+	await get_tree().create_timer(1.4).timeout
+	await _save_shot("06_gameover")
+	ui._open_settings()
+	await get_tree().create_timer(0.5).timeout
+	await _save_shot("07_settings")
+	print("SCREENSHOTS_DONE")
+	get_tree().quit()
+
+
+func _save_shot(shot_name: String) -> void:
+	await RenderingServer.frame_post_draw
+	var image := get_viewport().get_texture().get_image()
+	var path := "user://shot_%s.png" % shot_name
+	var err := image.save_png(path)
+	print("SHOT %s -> %s (err=%d)" % [shot_name, ProjectSettings.globalize_path(path), err])

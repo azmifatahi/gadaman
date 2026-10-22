@@ -6,6 +6,14 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      capture_screenshots:
+        description: "Render gameplay screenshots (software GL, adds ~2 min)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
 
 env:
   GODOT_VERSION: "4.4.1"
@@ -195,6 +203,18 @@ jobs:
           path: build/sudan-runner.apk
           if-no-files-found: error
 
+      - name: Publish rolling "latest-build" release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view latest-build >/dev/null 2>&1 || \
+            gh release create latest-build --prerelease --target "$GITHUB_SHA" \
+              --title "Latest build (auto)" \
+              --notes "Automatically built APK from the latest commit. Download sudan-runner.apk below and install it on any Android 7+ phone (allow install from unknown sources)."
+          gh release upload latest-build build/sudan-runner.apk --clobber
+          gh release edit latest-build --target "$GITHUB_SHA"
+
       - name: Attach APK to release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -204,3 +224,62 @@ jobs:
             gh release create "${GITHUB_REF_NAME}" --title "Sudan Runner ${GITHUB_REF_NAME}" \
               --notes "Android build of Sudan Runner (Gadaman). Install the APK on any Android 7+ phone."
           gh release upload "${GITHUB_REF_NAME}" build/sudan-runner.apk --clobber
+
+  # ---------------------------------------------------------------------------
+  # 3. Render real screenshots on a software GL stack (manual trigger).
+  #    Used to visually review the procedural art without a physical device.
+  # ---------------------------------------------------------------------------
+  screenshots:
+    name: Capture screenshots
+    if: github.event_name == 'workflow_dispatch' && inputs.capture_screenshots
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Install software GL + X virtual framebuffer
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libgl1 libglx-mesa0 libglu1-mesa mesa-utils
+          echo "--- glxinfo ---"
+          xvfb-run -a glxinfo -B 2>&1 | head -n 12 || true
+
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: false
+
+      - name: Import project
+        run: godot --headless --import 2>&1 | tail -n 5
+
+      - name: Render screenshots
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: "llvmpipe"
+        run: |
+          set -o pipefail
+          timeout 240 xvfb-run -a -s "-screen 0 1280x720x24" \
+            godot --rendering-driver opengl3 --resolution 1280x720 -- --screenshot 2>&1 | tee shots.log || true
+          grep -E "SHOT|SCREENSHOTS_DONE|ERROR" shots.log | tail -n 20 || true
+          mkdir -p docs/screenshots
+          USER_DIR="$HOME/.local/share/godot/app_userdata/Sudan Runner"
+          ls -la "$USER_DIR" || true
+          cp "$USER_DIR"/shot_*.png docs/screenshots/ 2>/dev/null || true
+          ls -la docs/screenshots
+
+      - name: Commit screenshots to the branch
+        run: |
+          if ! ls docs/screenshots/shot_*.png >/dev/null 2>&1; then
+            echo "::warning::No screenshots were rendered."
+            exit 0
+          fi
+          git config user.name "Sudan Runner CI"
+          git config user.email "ci@users.noreply.github.com"
+          git add docs/screenshots
+          git commit -m "docs: automated gameplay screenshots"
+          git push origin "HEAD:${{ github.ref_name }}"
