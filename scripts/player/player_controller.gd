@@ -287,58 +287,24 @@ func _physics_process(delta: float) -> void:
 func _drive_anim_tree(_delta: float, _speed: float) -> void:
 	if _anim_tree == null:
 		return
-	# Locate the BlendSpace1D (run_blend) and the lane blend node inside the
-	# locomotion sub-tree. Paths are nested: parameters/locomotion/<inner>/<prop>.
-	# We search for the first BlendSpace1D-style blend_position and the first
-	# Blend2 amount parameter, which is robust against node renames.
-	var bs_path := _find_param("blend_position")
-	if bs_path != "":
-		_anim_tree.set(bs_path, run_blend)
-	var lean_path := _find_param("amount", "lean")
-	if lean_path != "":
-		_anim_tree.set(lean_path, clampf(lane_blend * 0.5, -1.0, 1.0))
-	# Tick the animation handler so it can state-machine travel.
+	# The AnimationTree root is an AnimationNodeStateMachine whose "locomotion"
+	# state embeds a BlendTree. The BlendSpace1D for speed is also named
+	# "locomotion" and the lane-lean Blend2 is named "lean" – these names come
+	# from ImportArabicFolderHero.gd when it builds hero.tscn.
+	_set_param_safe("parameters/locomotion/locomotion/blend_position", run_blend)
+	_set_param_safe("parameters/locomotion/lean/amount",
+		clampf(lane_blend * 0.5, -1.0, 1.0))
 	if _anim_handler and _anim_handler.has_method("tick"):
 		_anim_handler.tick(_delta, is_sliding, is_airborne, is_stumbling)
 
 
-func _find_param(prop_suffix: String, node_name_hint: String = "") -> String:
+func _set_param_safe(path: String, value: float) -> void:
 	if _anim_tree == null:
-		return ""
-	# Godot 4 exposes properties of nodes inside nested AnimationNodeStateMachine
-	# trees at paths like:
-	#   parameters/<state_machine>/playback                           (state machine)
-	#   parameters/<state>/<node_in_sub_blendtree>/<property>         (nested props)
-	# Our root is a StateMachine; the "locomotion" state holds a BlendTree with
-	# an inner BlendSpace1D also named "locomotion" and a Blend2 named "lean".
-	var candidates := [
-		"parameters/playback",
-		"parameters/locomotion/locomotion/" + prop_suffix,
-		"parameters/locomotion/lean/" + prop_suffix,
-		"parameters/locomotion/" + prop_suffix,
-		"parameters/" + prop_suffix,
-	]
-	if node_name_hint != "":
-		candidates.insert(0, "parameters/locomotion/%s/%s" % [node_name_hint, prop_suffix])
-		candidates.insert(0, "parameters/%s/%s" % [node_name_hint, prop_suffix])
-	for p in candidates:
-		if _prop_exists(_anim_tree, p):
-			return p
-	return ""
-
-
-func _prop_exists(obj: Object, path: String) -> bool:
-	# Safely probe whether an Object exposes a property path, without spamming
-	# the console with errors on miss.
-	var v = obj.get(path, _MISSING)
-	return v != _MISSING
-
-
-const _MISSING := "__missing__"
+		return
+	_anim_tree.set(path, value)
 
 
 func _reset_tree_oneshots() -> void:
-	# StateMachine-driven; nothing to reset – travel back to locomotion.
 	if _anim_handler and _anim_handler.has_method("fire"):
 		_anim_handler.fire("recover")
 

@@ -6,7 +6,7 @@
 ## "What's new" popup instead of surprising the player.
 extends Node
 
-const CURRENT_VERSION := ProjectSettings.get_setting("application/config/version", "1.1.0")
+const CURRENT_VERSION := "1.1.0"
 const VERSION_FILE := "user://version.cfg"
 
 var previous_version: String = ""
@@ -34,7 +34,6 @@ func _load_version_file() -> void:
 	if err == OK:
 		previous_version = str(cfg.get_value("version", "last", ""))
 	else:
-		# No version file -> first install.
 		previous_version = ""
 
 
@@ -48,10 +47,10 @@ func _build_notes() -> void:
 	if just_installed:
 		return
 	if _version_less(previous_version, "1.1.0"):
-		update_notes.append(_t("update.hero"))       # New 3D hero model
-		update_notes.append(_t("update.suit"))       # Sudan flag PBR suit
-		update_notes.append(_t("update.upgrade_fix"))# Seamless future updates
-		update_notes.append(_t("update.anims"))      # Imported Run/Jump/Slide...
+		update_notes.append(_t("update.hero"))
+		update_notes.append(_t("update.suit"))
+		update_notes.append(_t("update.upgrade_fix"))
+		update_notes.append(_t("update.anims"))
 
 
 func _t(key: String) -> String:
@@ -61,11 +60,12 @@ func _t(key: String) -> String:
 
 
 func _version_less(a: String, b: String) -> bool:
-	var pa := _parse(a)
-	var pb := _parse(b)
-	for i in range(maxi(pa.size(), pb.size())):
-		var xa := pa[i] if i < pa.size() else 0
-		var xb := pb[i] if i < pb.size() else 0
+	var pa: Array = _parse(a)
+	var pb: Array = _parse(b)
+	var count: int = maxi(pa.size(), pb.size())
+	for i in range(count):
+		var xa: int = pa[i] if i < pa.size() else 0
+		var xb: int = pb[i] if i < pb.size() else 0
 		if xa < xb:
 			return true
 		if xa > xb:
@@ -74,9 +74,9 @@ func _version_less(a: String, b: String) -> bool:
 
 
 func _parse(v: String) -> Array:
-	var parts := v.split(".")
-	var out := []
+	var parts: PackedStringArray = v.split(".")
+	var out: Array = []
 	for p in parts:
-		var n := p.to_int()
-		out.append(n if n != 0 or p.is_valid_int() else 0)
+		var n: int = int(p) if p.is_valid_int() else 0
+		out.append(n)
 	return out
