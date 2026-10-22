@@ -9,6 +9,9 @@ build/
 *.aab
 *.apk.idsig
 android/build/
+# CI signing keystore (rebuilt deterministically from cache, never committed)
+ci-release.keystore
+release.keystore
 
 # OS / editor noise
 .DS_Store

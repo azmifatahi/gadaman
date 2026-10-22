@@ -154,11 +154,23 @@ jobs:
           ls "$ANDROID_SDK_ROOT/build-tools" || true
           ls -la "$HOME/.android" || true
 
-      - name: Create CI signing key
+      - name: Restore stable signing keystore from cache
+        id: keystore-cache
+        uses: actions/cache@v4
+        with:
+          path: ci-release.keystore
+          key: android-keystore-v1-${{ github.repository }}
+
+      - name: Create CI signing key (stable across builds)
+        if: steps.keystore-cache.outputs.cache-hit != 'true'
         run: |
-          # Throwaway key so the workflow needs no repository secret. Replace it
-          # with your own keystore (and keep it safe!) for Play Store updates.
-          keytool -genkeypair -v             -keystore ci-release.keystore             -alias gadaman             -keyalg RSA -keysize 2048 -validity 10000             -storepass gadaman -keypass gadaman             -dname "CN=Sudan Runner CI, O=Gadaman, C=SD"             -deststoretype pkcs12
+          # The signing certificate MUST stay stable across builds, otherwise
+          # Android refuses to install the new APK over the old one ("signature
+          # mismatch", requires uninstall). The script generates the keystore
+          # once; subsequent runs hit the actions/cache above.
+          # For Play Store builds drop tools/release.keystore in the repo and
+          # the script will copy that one instead.
+          python3 tools/ci_gen_keystore.py
           ls -lh ci-release.keystore
 
       - name: Export APK

@@ -190,16 +190,16 @@ FFMPEG_BIN=$(which ffmpeg) python3 tools/generate_audio.py   # الموسيقى 
 2. **Export APK** — يثبّت Android SDK (build-tools 34/35) ويصدّر APK موقّعًا بمفتاح التصحيح.
 
 للتحميل مباشرة (بدون تسجيل دخول):
-**[⬇️ أحدث APK](../../releases/latest/download/sudan-runner.apk)** — من صفحة الإصدار `latest-build`، أو من **Actions → آخر تشغيل → Artifacts → `sudan-runner-apk`**.
-ولإنشاء إصدار رسمي: أنشئ وسمًا مثل `v1.0.0`:
+**[⬇️ أحدث APK (v1.1.0)](../../releases/latest/download/sudan-runner.apk)** — من صفحة الإصدار `latest-build`، أو من **Actions → آخر تشغيل → Artifacts → `sudan-runner-apk`**.
+ولإنشاء إصدار رسمي: أنشئ وسمًا مثل `v1.1.0`:
 
 ```bash
-git tag v1.0.0 && git push origin v1.0.0
+git tag v1.1.0 && git push origin v1.1.0
 ```
 
 سيُرفق الـ APK تلقائيًا بصفحة **Releases**.
 
-> الـ APK في الـ CI موقّع بمفتاح debug (قابل للتثبيت على أي جهاز، لكن غير مناسب للنشر على Google Play). للنشر: أنشئ keystore خاصًا واستخدم `--export-release` كما في الأسفل.
+> ⚠ **ملاحظة الترقية من v1.0.0 إلى v1.1.0**: تم تبديل شهادة توقيع الـ APK في CI إلى شهادة ثابتة (تُحفَظ في `actions/cache`) حتى تتثبّت التحديثات المستقبلية فوق القديمة بدون حذف. للانتقال من 1.0.0 القديم إلى 1.1.0: احذف النسخة القديمة من إعدادات الهاتف أولاً، ثم ثبّت 1.1.0 (نتائجك المحفوظة لن تفقد لأن `retain_data_on_uninstall=true` مُفَعّل من 1.1.0 فما فوق). من 1.1.0 فصاعدًا، ستعمل التحديثات الهوائية مباشرة.
 
 ### ب) محليًا
 

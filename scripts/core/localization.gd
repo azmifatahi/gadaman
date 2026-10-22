@@ -65,6 +65,13 @@ const STRINGS := {
 		"crash.pothole": "حفرة",
 		"crash.bar": "حاجز منخفض",
 		"hint.swipe": "اسحب للبدء",
+		"update.title": "ما الجديد؟",
+		"update.hero": "🏃 شخصية ثلاثية الأبعاد جديدة بالكامل",
+		"update.suit": "🇸🇩 بدلة السودان المعدنية (PBR)",
+		"update.upgrade_fix": "🔄 تحديثات مستقبلية بدون حذف النسخة القديمة",
+		"update.anims": "🎞 حركات حقيقية: جري، قفز، انزلاق، تعثر",
+		"update.continue": "شكراً، فلنجرِ!",
+		"update.uninstall_notice": "⚠ إذا لم يثبّت التحديث فوق القديم: احذف النسخة القديمة أولاً من إعدادات الهاتف، ثم ثبّت هذه النسخة (نتائجك محفوظة في السحابة المحلية).",
 	},
 	"en": {
 		"game.title": "SUDAN RUNNER",
@@ -125,6 +132,13 @@ const STRINGS := {
 		"crash.pothole": "Pothole",
 		"crash.bar": "Low barrier",
 		"hint.swipe": "Swipe to start",
+		"update.title": "What's new?",
+		"update.hero": "🏃 Brand new 3D hero character",
+		"update.suit": "🇸🇩 Sudan chrome PBR suit",
+		"update.upgrade_fix": "🔄 Future updates install seamlessly",
+		"update.anims": "🎞 Real Run/Jump/Slide/Stumble animations",
+		"update.continue": "Thanks, let's run!",
+		"update.uninstall_notice": "⚠ If the update refuses to install over the old version: uninstall the old APK first from Android settings, then install this one. High-scores are preserved on device.",
 	},
 }
 

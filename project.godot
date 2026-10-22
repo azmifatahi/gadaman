@@ -11,7 +11,7 @@ config_version=5
 
 config/name="Sudan Runner"
 config/description="3D endless runner through the streets of Khartoum. Collect karkadeh, dodge barriers, go far."
-config/version="1.0.0"
+config/version="1.1.0"
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.4", "GL Compatibility")
 boot_splash/bg_color=Color(0.027451, 0.0392157, 0.0431373, 1)
@@ -32,6 +32,7 @@ Loc="*res://scripts/core/localization.gd"
 Perf="*res://scripts/core/performance_manager.gd"
 Audio="*res://scripts/core/audio_manager.gd"
 Game="*res://scripts/core/game_manager.gd"
+Version="*res://scripts/core/version_manager.gd"
 
 [display]
 
