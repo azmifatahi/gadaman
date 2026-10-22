@@ -209,7 +209,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release view latest-build >/dev/null 2>&1 || \
-            gh release create latest-build --prerelease --target "$GITHUB_SHA" \
+            gh release create latest-build --latest --target "$GITHUB_SHA" \
               --title "Latest build (auto)" \
               --notes "Automatically built APK from the latest commit. Download sudan-runner.apk below and install it on any Android 7+ phone (allow install from unknown sources)."
           gh release upload latest-build build/sudan-runner.apk --clobber

@@ -34,6 +34,9 @@ func _ready() -> void:
 
 	_to_menu()
 	Audio.play_music()
+	# First launch: explain the four gestures before the run starts.
+	if not Settings.tutorial_seen:
+		ui.open_howto()
 
 	if "--smoke" in OS.get_cmdline_user_args():
 		_run_smoke_test()
@@ -139,28 +142,18 @@ func _on_milestone(_meters: int) -> void:
 
 
 # ---------------------------------------------------------------------------
-# System input: pause / Android back button
+# System notifications
+#
+# Pause / Android back button are handled by UiRoot instead: the UI runs with
+# PROCESS_MODE_ALWAYS, while this node is paused (and stops receiving input) as
+# soon as the player opens the pause menu.
 # ---------------------------------------------------------------------------
-func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("pause") or event.is_action_pressed("ui_cancel"):
-		if Game.state == Game.State.RUNNING or Game.state == Game.State.PAUSED:
-			Game.toggle_pause()
-			get_viewport().set_input_as_handled()
-
-
 func _notification(what: int) -> void:
 	match what:
 		NOTIFICATION_APPLICATION_FOCUS_OUT:
 			# Phones lose focus all the time (notifications, calls): auto-pause.
 			if Game.state == Game.State.RUNNING:
 				Game.toggle_pause()
-		NOTIFICATION_WM_GO_BACK_REQUEST:
-			if Game.state == Game.State.RUNNING:
-				Game.toggle_pause()
-			elif Game.state == Game.State.PAUSED:
-				_to_menu()
-			else:
-				get_tree().quit()
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +186,7 @@ func _run_smoke_test() -> void:
 # Saves PNGs to user:// so the workflow can publish them for review.
 # ---------------------------------------------------------------------------
 func _run_screenshot_session() -> void:
+	Settings.set_tutorial_seen(true)
 	await get_tree().create_timer(1.2).timeout
 	await _save_shot("01_menu")
 	_on_play_requested()
@@ -214,9 +208,13 @@ func _run_screenshot_session() -> void:
 	Game.end_run("screenshot")
 	await get_tree().create_timer(1.4).timeout
 	await _save_shot("06_gameover")
-	ui._open_settings()
+	ui.open_settings()
 	await get_tree().create_timer(0.5).timeout
 	await _save_shot("07_settings")
+	Game.to_menu()
+	ui.open_howto()
+	await get_tree().create_timer(0.5).timeout
+	await _save_shot("08_howto")
 	print("SCREENSHOTS_DONE")
 	get_tree().quit()
 

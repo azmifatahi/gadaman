@@ -803,6 +803,14 @@ func _on_reset_progress() -> void:
 	_refresh_settings_widgets()
 
 
+func open_howto() -> void:
+	_open_howto()
+
+
+func open_settings() -> void:
+	_open_settings()
+
+
 func _open_howto() -> void:
 	Audio.play_click()
 	_howto.visible = true
@@ -874,6 +882,29 @@ func retranslate() -> void:
 	_howto_lines.text = "• %s\n• %s\n• %s\n• %s" % [
 		Loc.t("howto.swipe"), Loc.t("howto.up"), Loc.t("howto.down"), Loc.t("howto.collect")]
 	_howto_ok_button.text = Loc.t("howto.start")
+
+
+# ---------------------------------------------------------------------------
+# System input (this layer runs with PROCESS_MODE_ALWAYS, so it still works
+# while the game tree is paused)
+# ---------------------------------------------------------------------------
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("pause") or event.is_action_pressed("ui_cancel"):
+		if Game.state == Game.State.RUNNING or Game.state == Game.State.PAUSED:
+			Game.toggle_pause()
+			get_viewport().set_input_as_handled()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		if Game.state == Game.State.RUNNING:
+			Game.toggle_pause()
+		elif Game.state == Game.State.PAUSED:
+			menu_requested.emit()
+		elif Game.state == Game.State.GAME_OVER:
+			menu_requested.emit()
+		else:
+			get_tree().quit()
 
 
 # ---------------------------------------------------------------------------
