@@ -36,12 +36,14 @@ func _ready() -> void:
 	_ring.set_surface_override_material(0, _get_ring_material())
 	add_child(_ring)
 
-	if not cheap:
+	# The painted billboard is only used as a distant readability aid on low-end
+	# devices, where it replaces the extra rim light of the 3D cup.
+	if cheap:
 		_sprite = MeshInstance3D.new()
 		_sprite.name = "Sprite"
 		_sprite.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var quad := QuadMesh.new()
-		quad.size = Vector2(0.95, 0.95)
+		quad.size = Vector2(0.9, 0.9)
 		_sprite.mesh = quad
 		add_child(_sprite)
 

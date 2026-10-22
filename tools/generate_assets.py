@@ -332,13 +332,13 @@ def noise_layer(size: int, base: tuple[int, int, int], amount: int, seed: int,
 
 def build_textures() -> None:
     size = 256
-    asphalt = noise_layer(size, (43, 45, 48), 9, 21)
+    asphalt = noise_layer(size, (58, 60, 65), 9, 21)
     d = ImageDraw.Draw(asphalt)
     rnd = random.Random(5)
     for _ in range(260):
         x, y = rnd.randrange(size), rnd.randrange(size)
         r = rnd.choice([1, 1, 2])
-        d.ellipse([x, y, x + r, y + r], fill=(70, 72, 74))
+        d.ellipse([x, y, x + r, y + r], fill=(86, 88, 92))
     for _ in range(14):
         x, y = rnd.randrange(size), rnd.randrange(size)
         d.line([(x, y), (x + rnd.randint(6, 26), y + rnd.randint(-4, 4))],

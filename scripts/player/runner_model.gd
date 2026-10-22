@@ -32,6 +32,8 @@ static var _mat_skin: StandardMaterial3D
 static var _mat_shoe: StandardMaterial3D
 static var _mat_gold: StandardMaterial3D
 static var _mat_dark: StandardMaterial3D
+static var _mat_red: StandardMaterial3D
+static var _mat_trousers: StandardMaterial3D
 
 
 func _ready() -> void:
@@ -81,6 +83,16 @@ static func _build_materials() -> void:
 		d.albedo_color = Color("#17191c")
 		d.roughness = 0.9
 		_mat_dark = d
+	if _mat_red == null:
+		var r := StandardMaterial3D.new()
+		r.albedo_color = Color("#d21034")
+		r.roughness = 0.8
+		_mat_red = r
+	if _mat_trousers == null:
+		var t := StandardMaterial3D.new()
+		t.albedo_color = Color("#efe9dc")
+		t.roughness = 0.85
+		_mat_trousers = t
 
 
 # ---------------------------------------------------------------------------
@@ -132,10 +144,14 @@ func _build_body() -> void:
 	_arm_r = _limb(Vector3(0.35, SHOULDER_Y, 0), Vector3(0.14, 0.46, 0.14),
 			_mat_flag, _mat_skin, "ArmR")
 	# Legs.
+	# Cream trousers with a flag-red side stripe: instantly readable against the
+	# dark asphalt, and it ties the character to the flag palette.
 	_leg_l = _limb(Vector3(-0.13, HIP_Y, 0), Vector3(0.18, 0.62, 0.2),
-			_mat_dark, _mat_shoe, "LegL")
+			_mat_trousers, _mat_shoe, "LegL")
 	_leg_r = _limb(Vector3(0.13, HIP_Y, 0), Vector3(0.18, 0.62, 0.2),
-			_mat_dark, _mat_shoe, "LegR")
+			_mat_trousers, _mat_shoe, "LegR")
+	_box(_leg_l, Vector3(0.05, 0.5, 0.02), Vector3(-0.07, -0.28, -0.1), _mat_red, "StripeL")
+	_box(_leg_r, Vector3(0.05, 0.5, 0.02), Vector3(-0.07, -0.28, -0.1), _mat_red, "StripeR")
 
 	# Cape: a flag panel hanging off the shoulders, animated by hand.
 	_cape = Node3D.new()

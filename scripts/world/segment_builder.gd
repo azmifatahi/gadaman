@@ -275,13 +275,14 @@ static func _build_market(st: SurfaceTool, rng: RandomNumberGenerator, density: 
 			z += rng.randf_range(7.0, 10.0)
 		for i in 4:
 			_acacia(st, side * (INNER + 0.6), -LENGTH * 0.5 + 5.0 + float(i) * 10.0, rng)
-	# Hanging bulb strings across the lane (very Khartoum souq).
+	# Hanging bulb strings across the lane (very Khartoum souq). They sit at
+	# 7 m - above the 4.5 m chase camera - so bulbs never fill the lens.
 	for i in 5:
 		var z := -LENGTH * 0.5 + 4.0 + float(i) * 8.0
-		MeshKit.add_box(st, Vector3(0, 5.2, z), Vector3(9.0, 0.05, 0.05), PALETTE["dark"])
+		MeshKit.add_box(st, Vector3(0, 7.4, z), Vector3(9.0, 0.05, 0.05), PALETTE["dark"])
 		for k in 5:
 			var lx := -3.6 + float(k) * 1.8
-			MeshKit.add_box(st, Vector3(lx, 5.05, z), Vector3(0.14, 0.22, 0.14),
+			MeshKit.add_box(st, Vector3(lx, 7.2, z), Vector3(0.16, 0.24, 0.16),
 					Color("#ffd88a"))
 
 

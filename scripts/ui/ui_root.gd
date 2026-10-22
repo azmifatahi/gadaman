@@ -229,12 +229,16 @@ func _build_hud() -> void:
 
 	var row := HBoxContainer.new()
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.alignment = BoxContainer.ALIGNMENT_BEGIN
 	row.add_theme_constant_override("separation", 12)
 	margin.add_child(row)
 
 	# Score block (leading edge).
 	var score_panel := PanelContainer.new()
 	score_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Panels must hug their content: by default an HBoxContainer stretches all
+	# children to the tallest sibling, which would make a full-height column.
+	score_panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	row.add_child(score_panel)
 	var score_box := VBoxContainer.new()
 	score_box.add_theme_constant_override("separation", 0)
@@ -257,6 +261,7 @@ func _build_hud() -> void:
 	_combo_chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_combo_label = _label("", "TitleLabel", 22)
 	_combo_chip.add_child(_combo_label)
+	_combo_chip.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_combo_chip.visible = false
 	row.add_child(_combo_chip)
 
@@ -268,12 +273,14 @@ func _build_hud() -> void:
 	# Cups + pause (trailing edge, thumb reachable).
 	var right := VBoxContainer.new()
 	right.alignment = BoxContainer.ALIGNMENT_BEGIN
+	right.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	right.add_theme_constant_override("separation", 10)
 	right.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(right)
 
 	var cups_panel := PanelContainer.new()
 	cups_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cups_panel.size_flags_horizontal = Control.SIZE_SHRINK_END
 	right.add_child(cups_panel)
 	var cups_row := HBoxContainer.new()
 	cups_row.add_theme_constant_override("separation", 8)
@@ -454,6 +461,7 @@ func _build_gameover() -> void:
 		cap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(cap)
 		var value := _label("0", "HudLabel", 30)
+		value.custom_minimum_size = Vector2(96, 0)
 		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(value)
 		_go_captions[key] = cap
@@ -625,8 +633,8 @@ func _build_toast() -> void:
 	_toast.anchor_right = 1.0
 	_toast.anchor_top = 0.0
 	_toast.anchor_bottom = 0.0
-	_toast.offset_top = 150.0
-	_toast.offset_bottom = 240.0
+	_toast.offset_top = 132.0
+	_toast.offset_bottom = 212.0
 	_toast.modulate.a = 0.0
 	_toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.add_child(_toast)
@@ -661,6 +669,10 @@ func _show_gameover_deferred() -> void:
 		return
 	_fill_gameover(Game.last_summary())
 	_gameover.visible = true
+	# The crash toast would otherwise sit on top of the title.
+	if _toast_tween and _toast_tween.is_valid():
+		_toast_tween.kill()
+	_toast.modulate.a = 0.0
 
 
 func _fill_gameover(summary: Dictionary) -> void:
@@ -868,6 +880,8 @@ func retranslate() -> void:
 # Misc
 # ---------------------------------------------------------------------------
 func show_toast(text: String, hold: float = 0.9) -> void:
+	if _gameover != null and _gameover.visible:
+		return
 	_toast.text = text
 	if _toast_tween and _toast_tween.is_valid():
 		_toast_tween.kill()
