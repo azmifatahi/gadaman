@@ -34,8 +34,11 @@ func _ready() -> void:
 
 	_to_menu()
 	Audio.play_music()
-	# First launch: explain the four gestures before the run starts.
-	if not Settings.tutorial_seen:
+	# First launch: explain the four gestures before the run starts. Automated
+	# sessions (CI smoke test / screenshots) skip it so they measure the game.
+	var automated := "--smoke" in OS.get_cmdline_user_args() or \
+			"--screenshot" in OS.get_cmdline_user_args()
+	if not Settings.tutorial_seen and not automated:
 		ui.open_howto()
 
 	if "--smoke" in OS.get_cmdline_user_args():
@@ -186,35 +189,35 @@ func _run_smoke_test() -> void:
 # Saves PNGs to user:// so the workflow can publish them for review.
 # ---------------------------------------------------------------------------
 func _run_screenshot_session() -> void:
-	Settings.set_tutorial_seen(true)
 	await get_tree().create_timer(1.2).timeout
 	await _save_shot("01_menu")
+	ui.open_howto()
+	await get_tree().create_timer(0.4).timeout
+	await _save_shot("02_howto")
+	ui.close_overlays()
 	_on_play_requested()
 	await get_tree().create_timer(2.2).timeout
-	await _save_shot("02_gameplay")
+	await _save_shot("03_gameplay")
 	player.jump()
 	await get_tree().create_timer(0.34).timeout
-	await _save_shot("03_jump")
+	await _save_shot("04_jump")
 	await get_tree().create_timer(1.1).timeout
 	player.slide()
 	await get_tree().create_timer(0.2).timeout
-	await _save_shot("04_slide")
+	await _save_shot("05_slide")
 	await get_tree().create_timer(0.8).timeout
 	Game.toggle_pause()
 	await get_tree().create_timer(0.5).timeout
-	await _save_shot("05_pause")
+	await _save_shot("06_pause")
 	Game.toggle_pause()
 	await get_tree().create_timer(0.2).timeout
 	Game.end_run("screenshot")
 	await get_tree().create_timer(1.4).timeout
-	await _save_shot("06_gameover")
+	await _save_shot("07_gameover")
 	ui.open_settings()
 	await get_tree().create_timer(0.5).timeout
-	await _save_shot("07_settings")
+	await _save_shot("08_settings")
 	Game.to_menu()
-	ui.open_howto()
-	await get_tree().create_timer(0.5).timeout
-	await _save_shot("08_howto")
 	print("SCREENSHOTS_DONE")
 	get_tree().quit()
 

@@ -649,10 +649,12 @@ func _on_state_changed(state: int) -> void:
 	_pause.visible = state == Game.State.PAUSED
 	if state != Game.State.PAUSED:
 		get_tree().paused = false
+	# Any modal overlay belongs to the screen it was opened from: entering a run
+	# (or leaving one) always dismisses them.
+	_settings.visible = false
+	_howto.visible = false
 	if state == Game.State.MENU:
 		_gameover.visible = false
-		_settings.visible = false
-		_howto.visible = false
 		_best_menu_value.text = _format_int(Game.best_score)
 	if state == Game.State.GAME_OVER:
 		_show_gameover_deferred()
@@ -809,6 +811,11 @@ func open_howto() -> void:
 
 func open_settings() -> void:
 	_open_settings()
+
+
+func close_overlays() -> void:
+	_settings.visible = false
+	_howto.visible = false
 
 
 func _open_howto() -> void:
