@@ -244,10 +244,12 @@ func _apply_rendering_settings() -> void:
 		vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
 		vp.use_taa = false
 		vp.use_debanding = tier == Tier.HIGH
-		if vp.world_3d:
-			vp.world_3d.directional_shadow_atlas_size = 2048 if tier == Tier.HIGH else 1024
-			vp.world_3d.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
-			vp.world_3d.directional_shadow_max_distance = maxf(shadow_distance, 20.0)
+	# Shadow atlas size lives on the RenderingServer (and in project settings),
+	# not on World3D. 2048 only for the high tier: a 1024 atlas is 4x cheaper.
+	var atlas_size := 2048 if tier == Tier.HIGH else 1024
+	if DisplayServer.get_name() != "headless":
+		ProjectSettings.set_setting("rendering/lights_and_shadows/directional_shadow/size", atlas_size)
+		RenderingServer.directional_shadow_atlas_set_size(atlas_size, true)
 	if DisplayServer.get_name() != "headless":
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED)
 

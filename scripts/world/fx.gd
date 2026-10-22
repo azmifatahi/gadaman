@@ -97,4 +97,4 @@ func apply_quality() -> void:
 			continue
 		var base := 14.0 if p == _dust else (10.0 if p == _sparkle else 26.0)
 		p.amount = maxi(4, int(base * maxf(Perf.particle_amount, 0.35)))
-	p.emitting = false
+		p.emitting = false
