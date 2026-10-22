@@ -147,9 +147,7 @@ static func _build_walkways(st: SurfaceTool) -> void:
 		# Curb face toward the road.
 		MeshKit.add_quad(st, Vector3(x_in, 0.0, h), Vector3(x_in, 0.16, h),
 				Vector3(x_in, 0.16, -h), Vector3(x_in, 0.0, -h), curb)
-		# Sidewalk edge strip.
-		_add_flat_box(st, Vector3(x_out - side * 0.18, 0.17, 0), Vector3(0.34, 0.02, LENGTH),
-				Color("#9c968a"))
+
 
 
 # ---------------------------------------------------------------------------

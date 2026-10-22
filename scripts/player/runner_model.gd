@@ -156,14 +156,14 @@ func _build_body() -> void:
 	# Cape: a flag panel hanging off the shoulders, animated by hand.
 	_cape = Node3D.new()
 	_cape.name = "Cape"
-	_cape.position = Vector3(0, 1.36, 0.17)
+	_cape.position = Vector3(0, 1.30, 0.16)
 	_root.add_child(_cape)
 	var cape_mesh := MeshInstance3D.new()
 	var quad := QuadMesh.new()
-	quad.size = Vector2(0.72, 0.95)
+	quad.size = Vector2(0.52, 0.66)
 	cape_mesh.mesh = quad
 	cape_mesh.material_override = _mat_flag_double
-	cape_mesh.position = Vector3(0, -0.48, 0)
+	cape_mesh.position = Vector3(0, -0.33, 0)
 	cape_mesh.rotation = Vector3(0, PI, 0)
 	cape_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_cape.add_child(cape_mesh)
@@ -247,7 +247,7 @@ func animate(delta: float, speed: float, sliding: bool, airborne: bool) -> void:
 	# Bob + head counter-rotation keeps the run from looking like a toy.
 	_head.rotation.x = sin(_cycle * 2.0) * 0.05 - _root.rotation.x * 0.35
 	# Cape trails behind (+Z) and flutters faster the quicker we run.
-	_cape_swing = lerp(_cape_swing, 0.35 + speed * 0.022, blend)
+	_cape_swing = lerp(_cape_swing, 0.75 + speed * 0.028, blend)
 	_cape.rotation.x = -_cape_swing + sin(_cycle * 2.3) * 0.12
 	_cape.rotation.z = sin(_cycle * 1.7) * 0.06
 

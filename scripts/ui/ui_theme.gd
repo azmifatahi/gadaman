@@ -7,7 +7,7 @@ class_name UiTheme
 extends RefCounted
 
 const INK := Color("#0b0d10")
-const PANEL_BG := Color(0.043, 0.051, 0.059, 0.90)
+const PANEL_BG := Color(0.043, 0.051, 0.059, 0.96)
 const PANEL_BG_SOLID := Color(0.043, 0.051, 0.059, 1.0)
 const GOLD := Color("#f2b705")
 const RED := Color("#d21034")

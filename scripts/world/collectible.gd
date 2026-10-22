@@ -95,7 +95,11 @@ func _cup_material() -> StandardMaterial3D:
 	if _cup_materials.has("cup"):
 		return _cup_materials["cup"]
 	var mat := MeshKit.vertex_material().duplicate() as StandardMaterial3D
-	mat.roughness = 0.45
+	# A glossy cone catches the low sun and turns cream on screen; matte keeps the
+	# karkadeh red / aradaib amber readable, which is the whole point of the prop.
+	mat.roughness = 1.0
+	mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	mat.emission_enabled = false
 	_cup_materials["cup"] = mat
 	return mat
 
