@@ -58,7 +58,7 @@ static func _build_materials() -> void:
 		_mat_flag = m
 	if _mat_flag_double == null:
 		var m2 := StandardMaterial3D.new()
-		m2.albedo_texture = flag_tex
+		m2.albedo_texture = load("res://assets/textures/flag_stripes.png")
 		m2.roughness = 0.8
 		m2.cull_mode = BaseMaterial3D.CULL_DISABLED
 		_mat_flag_double = m2

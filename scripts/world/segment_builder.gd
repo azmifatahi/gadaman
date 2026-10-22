@@ -102,8 +102,8 @@ static func clear_cache() -> void:
 # ---------------------------------------------------------------------------
 static func _build_ground(st: SurfaceTool) -> void:
 	var h := LENGTH * 0.5
-	MeshKit.add_quad(st, Vector3(-70, -0.06, h), Vector3(70, -0.06, h),
-			Vector3(70, -0.06, -h), Vector3(-70, -0.06, -h), Color.WHITE, 24.0)
+	MeshKit.add_quad(st, Vector3(-160, -0.06, h), Vector3(160, -0.06, h),
+			Vector3(160, -0.06, -h), Vector3(-160, -0.06, -h), Color.WHITE, 14.0)
 
 
 static func _build_road(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
@@ -116,8 +116,8 @@ static func _build_road(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
 	var z := -h
 	while z < h:
 		for lane_edge: float in [-1.2, 1.2]:
-			_add_flat_box(st, Vector3(lane_edge, 0.012, z + 1.5), Vector3(0.12, 0.01, 2.6),
-					paint * Color(1, 1, 1, 1))
+			_add_flat_box(st, Vector3(lane_edge, 0.03, z + 1.5), Vector3(0.16, 0.012, 2.6),
+					paint)
 		z += 5.6
 	# Occasional crosswalk / speed bump paint for rhythm.
 	if rng.randf() < 0.5:

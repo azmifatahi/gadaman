@@ -96,9 +96,6 @@ func _cup_material() -> StandardMaterial3D:
 		return _cup_materials["cup"]
 	var mat := MeshKit.vertex_material().duplicate() as StandardMaterial3D
 	mat.roughness = 0.45
-	mat.emission_enabled = true
-	mat.emission = Color(1.0, 0.92, 0.78)
-	mat.emission_energy_multiplier = 0.12
 	_cup_materials["cup"] = mat
 	return mat
 

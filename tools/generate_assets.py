@@ -377,6 +377,14 @@ def build_textures() -> None:
     flag = flag_image(512, 256)
     flag.convert("RGB").save(os.path.join(TEX, "flag.png"))
 
+    # Bands-only version: used for capes, where a hoist triangle would read as
+    # an odd green wedge from behind. Same official proportions.
+    stripes = Image.new("RGB", (64, 96))
+    sd2 = ImageDraw.Draw(stripes)
+    for i, col in enumerate((RED, WHITE, BLACK)):
+        sd2.rectangle([0, i * 32, 64, i * 32 + 32], fill=col)
+    stripes.save(os.path.join(TEX, "flag_stripes.png"))
+
 
 def main() -> None:
     for path in (ART, TEX):

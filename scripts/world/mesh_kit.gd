@@ -212,7 +212,7 @@ static func sand_material() -> StandardMaterial3D:
 	if _mat_sand == null:
 		var m := StandardMaterial3D.new()
 		m.albedo_texture = load("res://assets/textures/sand.png")
-		m.uv1_scale = Vector3(30.0, 30.0, 1.0)
+		m.uv1_scale = Vector3(9.0, 9.0, 1.0)
 		m.roughness = 1.0
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
