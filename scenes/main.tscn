@@ -23,7 +23,7 @@ script = ExtResource("2_track")
 script = ExtResource("3_player")
 
 [node name="CameraRig" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4.55, 7.4)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4.05, 6.5)
 current = true
 fov = 62.0
 script = ExtResource("4_camera")

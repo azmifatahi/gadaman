@@ -293,12 +293,15 @@ static func cup_mesh(kind: int) -> ArrayMesh:
 		return _cup_mesh_cache[kind]
 	var st := MeshKit.begin()
 	var liquid: Color = CUP_COLORS[kind % CUP_COLORS.size()]
-	# Glass.
-	MeshKit.add_cylinder(st, Vector3.ZERO, 0.17, 0.42, Color("#dceef2"), 10, 0.2)
-	# Liquid.
-	MeshKit.add_cylinder(st, Vector3(0, 0.04, 0), 0.155, 0.32, liquid, 10, 0.18)
-	# Rim + straw.
-	MeshKit.add_cylinder(st, Vector3(0, 0.42, 0), 0.2, 0.03, Color("#f2fbff"), 10)
+	# Solid glass of the drink (colour lives in the vertex data, so every cup of
+	# the same kind shares one mesh and one white vertex-colour material).
+	MeshKit.add_cylinder(st, Vector3(0, 0.02, 0), 0.17, 0.40, liquid, 10, 0.21)
+	# White rim + cream base, the plastic tea-glass look of a Sudanese street stall.
+	MeshKit.add_cylinder(st, Vector3(0, 0.42, 0), 0.215, 0.055, Color("#f4f1e8"), 10)
+	MeshKit.add_cylinder(st, Vector3(0, 0.0, 0), 0.185, 0.045, Color("#d9d3c4"), 10)
+	# A tiny Sudanese flag on a toothpick, poking out of the drink.
+	MeshKit.add_box(st, Vector3(0.03, 0.52, 0), Vector3(0.012, 0.22, 0.012), Color("#6b4a2f"))
+	MeshKit.add_flag_panel(st, Vector3(-0.055, 0.545, 0.0), 0.15, 0.1)
 
 	var mesh := st.commit()
 	_cup_mesh_cache[kind] = mesh

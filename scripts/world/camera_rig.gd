@@ -6,9 +6,9 @@
 class_name CameraRig
 extends Camera3D
 
-const BASE_HEIGHT := 4.55
-const BASE_DISTANCE := 7.4
-const LOOK_HEIGHT := 1.25
+const BASE_HEIGHT := 4.05
+const BASE_DISTANCE := 6.5
+const LOOK_HEIGHT := 1.35
 const LOOK_AHEAD := -8.0
 
 var target: Node3D

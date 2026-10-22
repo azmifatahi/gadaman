@@ -77,9 +77,11 @@ func activate(new_kind: int, x: float, y: float, z: float) -> void:
 	_phase = randf() * TAU
 	position = Vector3(x, y, z)
 	_cup.mesh = PropLibrary.cup_mesh(kind)
-	_cup.set_surface_override_material(0, _cup_tint(kind))
+	if _cup.get_surface_override_material(0) == null:
+		_cup.set_surface_override_material(0, _cup_material())
+	# Vertical halo that spins around the cup: reads as "pick me up" from 60 m.
 	_ring.rotation = Vector3(PI * 0.5, 0, 0)
-	_ring.position = Vector3(0, 0.02, 0)
+	_ring.position = Vector3(0, 0.24, 0)
 	if _sprite:
 		_sprite.set_surface_override_material(0, PropLibrary.cup_sprite_material(kind))
 		_sprite.position = Vector3(0, 0.22, 0)
@@ -89,17 +91,15 @@ func activate(new_kind: int, x: float, y: float, z: float) -> void:
 	set_process(true)
 
 
-func _cup_tint(kind_index: int) -> StandardMaterial3D:
-	var key := kind_index % PropLibrary.CUP_COLORS.size()
-	if _cup_materials.has(key):
-		return _cup_materials[key]
-	var base_color: Color = PropLibrary.CUP_COLORS[key]
+func _cup_material() -> StandardMaterial3D:
+	if _cup_materials.has("cup"):
+		return _cup_materials["cup"]
 	var mat := MeshKit.vertex_material().duplicate() as StandardMaterial3D
-	mat.albedo_color = base_color.lightened(0.35)
+	mat.roughness = 0.45
 	mat.emission_enabled = true
-	mat.emission = base_color
-	mat.emission_energy_multiplier = 0.35
-	_cup_materials[key] = mat
+	mat.emission = Color(1.0, 0.92, 0.78)
+	mat.emission_energy_multiplier = 0.12
+	_cup_materials["cup"] = mat
 	return mat
 
 
@@ -113,6 +113,6 @@ func _process(delta: float) -> void:
 	if not active:
 		return
 	_phase += delta
-	_cup.rotation.y += delta * 2.4
-	_ring.rotation.z += delta * 3.4
+	_cup.rotation.y += delta * 2.0
+	_ring.rotation.y += delta * 2.6
 	position.y = _base_y + sin(_phase * 2.6) * 0.07
