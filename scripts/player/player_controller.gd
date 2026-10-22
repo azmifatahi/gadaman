@@ -92,6 +92,15 @@ func _ready() -> void:
 
 
 func _attach_model() -> void:
+	# Safety net: if the hero scene isn't built yet (first launch before any
+	# editor/CI build step ever ran), try to build it on the fly. HeroBuilder
+	# is the same code CI uses headlessly; running it at _ready() is safe
+	# because ResourceLoader.exists(HERO_SCENE_PATH) is the fast path.
+	if not ResourceLoader.exists(HERO_SCENE_PATH):
+		if Engine.is_editor_hint():
+			pass  # In the editor the user is expected to run ImportArabicFolderHero.gd.
+		else:
+			HeroBuilder.build_if_missing()
 	# Prefer the imported hero scene; fall back to the procedural model if
 	# the hero scene doesn't exist (CI, first checkout before running the
 	# import tool).

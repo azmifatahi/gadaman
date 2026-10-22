@@ -47,11 +47,26 @@ jobs:
               echo "::error file=$f::GDScript parse error"
               fail=1
             fi
-          done < <(find scripts -name '*.gd' | sort)
+          done < <(find scripts tools -name '*.gd' | sort)
           exit $fail
 
       - name: Import project
         run: godot --headless --import 2>&1 | tail -n 40
+
+      - name: Build hero scene from Arabic FBX folder (headless)
+        run: |
+          # This runs HeroBuilder.build_hero() which scans res://الشخصيه/,
+          # merges the skinned mesh + all Mixamo animation clips, wires an
+          # AnimationTree (run_blend / lane_blend / jump/slide/stumble/fall/land
+          # one-shots), applies the Sudan chrome PBR suit material, and saves
+          # assets/models/hero/hero.tscn. No editor interaction required.
+          godot --headless --script tools/ci_build_hero.gd 2>&1 | tee hero_build.log
+          if ! grep -q "Hero build OK" hero_build.log; then
+            echo "::error::Automated hero build failed"
+            tail -n 30 hero_build.log | sed 's/^/::error::/'
+            exit 1
+          fi
+          ls -la res://assets/models/hero/ 2>/dev/null || ls -la assets/models/hero/
 
       - name: Headless gameplay smoke test
         run: |
@@ -145,6 +160,20 @@ jobs:
 
       - name: Import project
         run: godot --headless --import 2>&1 | tail -n 20
+
+      - name: Build hero scene from Arabic FBX folder (headless)
+        run: |
+          # Same step as in the validate job, repeated in the APK job because
+          # this is a fresh checkout. Without this the APK would ship with the
+          # procedural fallback model; with it the real imported hero ends up
+          # in assets/models/hero/hero.tscn and PlayerController picks it up.
+          godot --headless --script tools/ci_build_hero.gd 2>&1 | tee hero_build.log
+          if ! grep -q "Hero build OK" hero_build.log; then
+            echo "::error::Automated hero build failed during APK export"
+            tail -n 30 hero_build.log | sed 's/^/::error::/'
+            exit 1
+          fi
+          ls -la assets/models/hero/
 
       - name: Diagnostics
         run: |
