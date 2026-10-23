@@ -92,10 +92,15 @@ func _setup_lighting() -> void:
 ## Swap in the photographic or the painted sky, and keep the ambient light,
 ## the tonemapper and the Khartoum skyline in step with it. Used both at boot
 ## and when the Settings switch flips, so the two paths can never drift apart.
-func _apply_sky(photo_sky: SkyMaterial) -> void:
+## `SkyMaterial` is not exposed to GDScript as a global type, so the concrete
+## panorama material is the parameter type.
+func _apply_sky(photo_sky: PanoramaSkyMaterial) -> void:
 	var has_photo := photo_sky != null
 	var sky := Sky.new()
-	sky.sky_material = photo_sky if has_photo else _make_procedural_sky()
+	if photo_sky != null:
+		sky.sky_material = photo_sky
+	else:
+		sky.sky_material = _make_procedural_sky()
 	_environment.background_mode = Environment.BG_SKY
 	_environment.sky = sky
 	_environment.ambient_light_color = Color("#9a7f74") if has_photo \
@@ -113,7 +118,7 @@ func _apply_sky(photo_sky: SkyMaterial) -> void:
 		skyline.queue_free()
 
 
-func _make_photo_sky() -> SkyMaterial:
+func _make_photo_sky() -> PanoramaSkyMaterial:
 	if not Settings.photo_graphics:
 		return null
 	const PATH := "res://assets/textures/sky_khartoum.jpg"

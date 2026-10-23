@@ -116,10 +116,12 @@ static func build(variant: int, slot: int, density: float) -> ArrayMesh:
 	var present := PackedStringArray()
 	for name in SURFACES:
 		var st: SurfaceTool = tools[name]
-		var built := st.commit()
+		var built: ArrayMesh = st.commit()
 		if built == null or built.get_surface_count() == 0:
 			continue
-		mesh.append_from(built, 0, Transform3D())
+		# ArrayMesh has no append_from(): copy the surface's arrays across.
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,
+				built.surface_get_arrays(0))
 		present.append(name)
 	mesh.set_meta("surfaces", present)
 	_cache[key] = mesh
