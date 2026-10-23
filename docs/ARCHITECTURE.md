@@ -310,6 +310,50 @@ meshes without rewriting the runner.
    distances around 14 m and 32 m. All variants must share the same silhouette
    and animation names.
 
+### Generated hero scene (`assets/models/hero/hero.tscn`)
+
+`HeroBuilder` (scripts/tools/hero_builder.gd) is the only consumer of the
+character folder. It runs headless in CI (tools/ci_build_hero.gd) and from the
+editor (scripts/tools/ImportArabicFolderHero.gd); the game itself never touches
+FBX at runtime because exported builds do not ship the source files.
+
+Pipeline invariants:
+
+1. **Content-based skin selection.** Each candidate is instantiated and its
+   real mesh vertex count is measured; the richest file is the skin. File
+   names, file sizes and byte sniffing are not used (in an APK the `.fbx`
+   sources report size 0, which previously selected a motion-only clip and
+   produced a hero without geometry).
+2. **Track retargeting.** Every animation track is rewritten onto
+   `Mesh/<skeleton path>:<bone>` by normalised bone name
+   (`mixamorig:Hips`, `mixamorig_Hips` and `Hips` are equivalent). Motion-only
+   Mixamo exports store bone motion as plain `Node3D` tracks; those are mapped
+   onto bones as well, and hip X/Z translation is pinned so the runner cannot
+   drift out of its collision box.
+3. **Normalised presentation.** Uniform scale to 1.78 m, feet on Y=0, centred
+   on X/Z and yawed so the character faces -Z (away from the chase camera).
+   Bounds are computed by walking local transforms because
+   `Node3D.global_transform` is invalid outside the SceneTree.
+4. **Ownership before packing.** `PackedScene.pack()` drops any node whose
+   `owner` is not the packed root (`SceneState::_parse_node()` returns early and
+   skips the whole subtree). The builder assigns `owner` recursively, which is
+   what makes the skeleton, skinned mesh and materials end up in the saved
+   scene at all.
+5. **Self-verification.** The builder re-loads the file it just wrote and
+   `HeroBuilder.verify()` asserts: >= 1 visible mesh with surfaces, >= 200
+   vertices, height within 1.2-2.4 m, feet within +/-0.2 m of the ground, a
+   skeleton with >= 10 bones and a non-collapsed rest pose, an AnimationTree,
+   and every required clip (jog/jump/fall/land/slide/stumble) having at least
+   one track that resolves inside the scene. CI runs the same check with
+   `--strict` and refuses to export an APK when it fails.
+6. **Runtime fallback.** `PlayerController._hero_is_drawable()` repeats the
+   cheap part of that check on the loaded scene and falls back to the
+   procedural `RunnerModel` instead of rendering nothing.
+
+Suit material: `scripts/player/hero_material.gd`. It is deliberately dielectric
+(metallic 0.05) — with the Compatibility renderer and reflections disabled a
+metallic suit renders black.
+
 ### Environment and lighting
 
 * Import asphalt, concrete, brick, rusty metal and wood as tileable PBR sets;

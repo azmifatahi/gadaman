@@ -20,18 +20,10 @@ func _run() -> void:
 	print("Realistic runner setup complete: %d mesh surfaces upgraded." % upgraded)
 
 
+## Delegates to the shared HeroMaterial so the editor tool, the hero builder and
+## the game all use the same mobile-safe (non-metallic) suit.
 static func make_suit_material() -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
-	material.resource_name = "Sudan Chrome Suit PBR"
-	material.albedo_texture = FLAG
-	material.metallic = 0.8
-	material.roughness = 0.2
-	material.normal_enabled = true
-	material.normal_texture = SEAMS
-	material.normal_scale = 0.42
-	material.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
-	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
-	return material
+	return HeroMaterial.make_suit_material()
 
 
 static func upgrade_runner(root: Node) -> int:

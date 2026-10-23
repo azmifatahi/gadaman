@@ -15,5 +15,7 @@ func _run() -> void:
 		get_editor_interface().get_resource_filesystem().scan()
 		get_editor_interface().mark_scene_as_unsaved()
 		print("[ImportArabicFolderHero] Done. Hero scene at %s" % HeroBuilder.HERO_SCENE_PATH)
+		print("[ImportArabicFolderHero] verify: %s" % JSON.stringify(HeroBuilder.verify(), "  "))
 	else:
 		push_error("[ImportArabicFolderHero] Build failed – check the Output panel.")
+		push_error("[ImportArabicFolderHero] verify: %s" % JSON.stringify(HeroBuilder.verify(), "  "))
