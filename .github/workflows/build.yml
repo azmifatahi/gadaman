@@ -175,11 +175,21 @@ jobs:
       - name: Build hero scene from Arabic FBX folder (STRICT)
         timeout-minutes: 5
         run: |
-          godot --headless -v --script tools/ci_build_hero.gd -- --strict 2>&1 | tee hero_build.log | tail -n 120
+          set +e
+          godot --headless -v --script tools/ci_build_hero.gd -- --strict > hero_build.log 2>&1
+          rc=$?
+          set -e
+          echo "--- hero_build.log (rc=$rc) ---"
+          cat hero_build.log
+          echo "--- end log ---"
           if ! grep -q "Hero build OK" hero_build.log; then
             echo "::error::Hero build failed in APK job – aborting export."
-            echo "--- last 80 lines of hero_build.log ---"
-            tail -n 80 hero_build.log
+            echo "::group::Folder listing"
+            ls -la "assets/characters/" 2>/dev/null || true
+            ls -la "assets/characters/الشخصية/" 2>/dev/null || echo "no arabic folder"
+            echo "--- imported FBX files ---"
+            find .godot/imported -iname "*fbx*" 2>/dev/null | head -40
+            echo "::endgroup::"
             exit 1
           fi
           ls -la assets/models/hero/
