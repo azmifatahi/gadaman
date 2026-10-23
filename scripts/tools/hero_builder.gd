@@ -183,11 +183,10 @@ func _mkdir(path: String) -> void:
 	if da == null:
 		printerr("[HeroBuilder] Cannot open res://")
 		return
-	var rel := path.trim_prefix("res://").rtrim("/")
+	var rel: String = path.trim_prefix("res://").rtrim("/")
 	if rel.begins_with("assets/"):
-		# Walk down and make sure assets/models exists first.
-		var parts := rel.split("/")
-		var cur := ""
+		var parts: PackedStringArray = rel.split("/")
+		var cur: String = ""
 		for p in parts:
 			cur += p
 			if not da.dir_exists(cur):
@@ -199,8 +198,9 @@ func _fbx2gltf_available() -> bool:
 	# Godot's FBX importer shells out to FBX2glTF at import time. Without the
 	# binary on PATH, load() on an FBX scene hangs indefinitely waiting for
 	# the child process. We detect availability up front and short-circuit.
-	var path_env := OS.get_environment("PATH", "")
-	for d in path_env.split(":"):
+	var path_env: String = OS.get_environment("PATH")
+	var dirs: PackedStringArray = path_env.split(":")
+	for d in dirs:
 		if d == "":
 			continue
 		var cand := d.rstrip("/") + "/FBX2glTF"
@@ -311,26 +311,28 @@ func _build_hero_from_scene(skin_scene: PackedScene, skin_path: String, clips: D
 
 	var tree := AnimationTree.new()
 	tree.name = "AnimationTree"
-	tree.anim_player = ap
+	tree.anim_player = NodePath("../AnimationPlayer")
+	tree.root_motion_track = NodePath()
 	tree.active = true
 	tree.tree_root = _build_state_machine()
 	hero.add_child(tree)
 
 	_fit_mesh_to_game(mesh_root)
 
-	var suit_script: GDScript = load("res://scripts/tools/SetupRealisticRunner.gd")
-	if suit_script:
-		var suit_mat := suit_script.make_suit_material()
-		for mi in mesh_root.find_children("*", "MeshInstance3D", true, false):
-			var m := mi as MeshInstance3D
-			if m.mesh == null:
-				continue
-			var ln := m.name.to_lower()
-			if ln.find("eye") != -1 or ln.find("lashes") != -1 or ln.find("teeth") != -1:
-				continue
-			for s in range(m.mesh.get_surface_count()):
-				m.set_surface_override_material(s, suit_mat)
-			m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	var suit_script: GDScript = load("res://scripts/tools/SetupRealisticRunner.gd") as GDScript
+	if suit_script != null:
+		var suit_mat: Material = suit_script.make_suit_material()
+		if suit_mat != null:
+			for node in mesh_root.find_children("*", "MeshInstance3D", true, false):
+				var m: MeshInstance3D = node as MeshInstance3D
+				if m.mesh == null:
+					continue
+				var ln: String = m.name.to_lower()
+				if ln.find("eye") != -1 or ln.find("lashes") != -1 or ln.find("teeth") != -1:
+					continue
+				for s in range(m.mesh.get_surface_count()):
+					m.set_surface_override_material(s, suit_mat)
+				m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		suit_script.ensure_reflection_probe(hero)
 	return hero
 
@@ -384,12 +386,12 @@ func _ensure_canonical(lib: AnimationLibrary) -> void:
 		print("[HeroBuilder] synthesized 'idle' from jog")
 	if not lib.has_animation("sprint") and lib.has_animation("jog"):
 		var jog: Animation = lib.get_animation("jog")
-		var sprint := jog.duplicate()
+		var sprint: Animation = jog.duplicate()
 		sprint.length = jog.length / 1.6
 		for t in range(sprint.get_track_count()):
-			var kc := sprint.track_get_key_count(t)
-			var times := []
-			var vals := []
+			var kc: int = sprint.track_get_key_count(t)
+			var times: Array[float] = []
+			var vals: Array = []
 			for k in range(kc):
 				times.append(sprint.track_get_key_time(t, k) / 1.6)
 				vals.append(sprint.track_get_key_value(t, k))
