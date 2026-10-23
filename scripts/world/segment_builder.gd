@@ -358,23 +358,34 @@ static func _acacia(st: SurfaceTool, x: float, z: float, rng: RandomNumberGenera
 		MeshKit.add_quad(st, base + Vector3(0, h * 0.55, 0),
 				base + Vector3(0.13, h * 0.55, 0.13), tip + Vector3(0.13, 0, 0.13), tip,
 				Color("#6b5238"))
-	var crown := h + 0.35
-	var spread := rng.randf_range(1.9, 2.9)
-	var leaves := 13
+	var crown := h + 0.55
+	var spread := rng.randf_range(1.5, 2.3)
+	# Many small, narrow leaflet clusters rather than a few big blades: at 3-4 m
+	# from the chase camera a 1.4 m leaf reads as a shard, not a tree.
+	var leaves := 22
 	for i in leaves:
-		var a := TAU * float(i) / float(leaves) + rng.randf_range(-0.16, 0.16)
+		var a := TAU * float(i) / float(leaves) + rng.randf_range(-0.12, 0.12)
 		var dir := Vector3(cos(a), 0.0, sin(a))
-		var len := spread * rng.randf_range(0.75, 1.15)
-		var droop := rng.randf_range(0.18, 0.55)
-		var mid := base + Vector3(0, crown + 0.25, 0) + dir * (len * 0.45)
-		var tip := base + Vector3(0, crown - droop, 0) + dir * len
-		var perp := Vector3(-dir.z, 0.0, dir.x) * rng.randf_range(0.34, 0.55)
-		# Alternate the two greens so the crown has depth instead of one flat tone.
+		var arm := spread * rng.randf_range(0.55, 1.0)
+		var droop := rng.randf_range(0.12, 0.6)
+		var mid := base + Vector3(0, crown + 0.30, 0) + dir * (arm * 0.5)
+		var tip := base + Vector3(0, crown - droop, 0) + dir * arm
+		var perp := Vector3(-dir.z, 0.0, dir.x) * rng.randf_range(0.16, 0.26)
 		var col: Color = PALETTE["leaf"] if i % 3 else PALETTE["leaf_dark"]
-		MeshKit.add_quad(st, mid - perp, mid + perp, tip + perp * 0.35, tip - perp * 0.35,
-				col.darkened(rng.randf_range(0.0, 0.12)))
+		MeshKit.add_quad(st, mid - perp, mid + perp, tip + perp * 0.4, tip - perp * 0.4,
+				col.darkened(rng.randf_range(0.0, 0.14)))
+	# A second, tighter tier above fills the crown silhouette.
+	for i in 10:
+		var a := TAU * float(i) / 10.0 + 0.3
+		var dir := Vector3(cos(a), 0.0, sin(a))
+		var arm := spread * 0.5 * rng.randf_range(0.7, 1.1)
+		var mid := base + Vector3(0, crown + 0.95, 0) + dir * (arm * 0.5)
+		var tip := base + Vector3(0, crown + 0.55, 0) + dir * arm
+		var perp := Vector3(-dir.z, 0.0, dir.x) * 0.15
+		MeshKit.add_quad(st, mid - perp, mid + perp, tip + perp * 0.4, tip - perp * 0.4,
+				PALETTE["leaf"].darkened(0.08))
 	# Dark core under the leaves fills the gap when seen from below.
-	MeshKit.add_cylinder(st, base + Vector3(0, crown - 0.35, 0), spread * 0.42, 0.45,
+	MeshKit.add_cylinder(st, base + Vector3(0, crown - 0.25, 0), spread * 0.34, 0.35,
 			PALETTE["leaf_dark"].darkened(0.15), 7)
 
 

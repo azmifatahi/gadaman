@@ -406,6 +406,25 @@ def equirect_panorama(img: Image.Image) -> Image.Image:
     wrapped = Image.composite(band, shifted, mask)
     out = wrapped.resize((w, upper), Image.LANCZOS)
 
+    # Pull the cloud field down towards the horizon.
+    #
+    # A chase camera sits ~4 m up and looks slightly DOWN, so it only sees the
+    # bottom ~25 % of the hemisphere (elevation 0..20 deg). Mapped linearly, the
+    # photo's clouds all end up above the top of the frame and the sky reads as
+    # a flat gradient. A row warp with a >1 exponent compresses the sky towards
+    # the horizon, which is also how a real low sun looks: the interesting part
+    # of the sky is the band right above the horizon.
+    warped = out.copy()
+    wp = warped.load()
+    op = out.load()
+    for y in range(upper):
+        t = y / max(1, upper - 1)
+        src_y = int(round((t ** 1.55) * (upper - 1)))
+        src_y = min(upper - 1, max(0, src_y))
+        for x in range(w):
+            wp[x, y] = op[x, src_y]
+    out = warped
+
     # Deepen the zenith: the top ~15 % of an equirect dome is the pole, which a
     # single-row photo does not actually contain.
     ramp = Image.new("RGB", (w, upper))
