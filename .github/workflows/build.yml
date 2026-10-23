@@ -235,6 +235,25 @@ jobs:
             exit 1
           }
 
+      - name: Publish hero diagnostics (annotations)
+        if: always()
+        run: |
+          # Check annotations are reachable through the GitHub API even when
+          # log bundles and artifacts cannot be downloaded.
+          emit() { echo "::notice title=hero::$(printf '%s' "$1" | tr '\n' '|' | cut -c1-900)"; }
+          emit "hero_dir: $(ls -la assets/models/hero/ 2>&1 | tr '\n' '|')"
+          emit "godot_dir: $(ls .godot 2>&1 | tr '\n' ' ') user=$(whoami)"
+          if [ -f assets/models/hero/hero.tscn ]; then
+            emit "hero_head: $(head -c 400 assets/models/hero/hero.tscn | tr '\n' '|')"
+            emit "hero_size: $(stat -c %s assets/models/hero/hero.tscn)"
+            emit "hero_nodes: $(grep -c '^\[node' assets/models/hero/hero.tscn)"
+          fi
+          for f in hero_verify_apk.log hero_verify.log; do
+            if [ -f "$f" ]; then
+              emit "log $f: $(tail -n 40 "$f" | tr '\n' '|')"
+            fi
+          done
+
       - name: Configure Godot for Android export
         run: |
           mkdir -p "$HOME/.config/godot"
