@@ -61,6 +61,11 @@ var _speed_penalty := 0.0
 var _rng := RandomNumberGenerator.new()
 var _segments_root: Node3D
 var _objects_root: Node3D
+## -1 = rotate through every district, otherwise a fixed SegmentBuilder variant.
+## Settings owns the value; the player picks a street in the Settings screen.
+var district: int = -1
+## The variant currently shown, so a district change can rebuild immediately.
+var _current_variant: int = 0
 
 
 func _ready() -> void:
@@ -159,6 +164,8 @@ func reset_world() -> void:
 	_cup_cursor = 0
 	for i in _segments.size():
 		_segments[i].position.z = -float(i) * SEGMENT_LENGTH
+		if district >= 0:
+			_segments[i].apply(district, i % SegmentBuilder.CACHE_SLOTS, Perf.prop_density)
 
 
 # ---------------------------------------------------------------------------
@@ -208,16 +215,39 @@ func _update_delivery(delta: float) -> void:
 		Game.end_run("delivery.timeout")
 
 
+## Fixed district (-1 = automatic). Rebuilds the visible chunks immediately when
+## the player changes it from the pause menu, so the new street appears without
+## restarting the run.
+func set_district(value: int) -> void:
+	district = value
+	if value >= 0:
+		for i in _segments.size():
+			_segments[i].apply(value, i % SegmentBuilder.CACHE_SLOTS, Perf.prop_density)
+		_current_variant = value
+
+
+## Variant for the next recycled chunk.
+func _pick_variant() -> int:
+	if district >= 0:
+		return district
+	# Automatic: keep bridges and old Bahri rare enough to feel like landmarks.
+	var roll := _rng.randf()
+	if distance > 400.0 and roll < 0.18:
+		return 4          # Mac Nimir bridge
+	if distance > 650.0 and roll < 0.26:
+		return 5          # Shambat bridge
+	if distance > 250.0 and roll < 0.38:
+		return 6          # old Bahri shopfronts
+	return [0, 0, 2, 3, 1][_rng.randi_range(0, 4)]   # street / corniche / houses / market
+
+
 func _scroll_segments(travel: float) -> void:
 	for seg in _segments:
 		seg.position.z += travel
 		if seg.position.z > SEGMENT_LENGTH:
 			seg.position.z -= SEGMENT_LENGTH * float(SEGMENT_COUNT)
 			# Re-roll the layout so the street never visibly repeats.
-			var variant := _rng.randi_range(0, SegmentBuilder.VARIANT_COUNT - 1)
-			if distance > 400.0 and _rng.randf() < 0.35:
-				variant = 4  # bridge sections feel earned after 400 m
-			seg.apply(variant, _rng.randi_range(0, SegmentBuilder.CACHE_SLOTS - 1),
+			seg.apply(_pick_variant(), _rng.randi_range(0, SegmentBuilder.CACHE_SLOTS - 1),
 					Perf.prop_density)
 
 
@@ -453,6 +483,12 @@ func _check_pickups() -> void:
 		Game.collect_cup(cup.kind)
 		cup_collected.emit(cup.kind, cup.position)
 		return
+
+
+## Rebuild every segment's surface materials after the photo-art switch flips.
+func refresh_photo_materials() -> void:
+	for seg in _segments:
+		seg.refresh_materials()
 
 
 ## Re-apply quality-dependent visuals (density, shadow casting, shader variant).

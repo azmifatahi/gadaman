@@ -6,7 +6,7 @@
 ## "What's new" popup instead of surprising the player.
 extends Node
 
-const CURRENT_VERSION := "1.2.2"
+const CURRENT_VERSION := "1.3.0"
 const VERSION_FILE := "user://version.cfg"
 
 var previous_version: String = ""
@@ -53,6 +53,10 @@ func _build_notes() -> void:
 		update_notes.append(_t("update.anims"))
 	if _version_less(previous_version, "1.2.2"):
 		update_notes.append(_t("update.hero_fix"))
+	if _version_less(previous_version, "1.3.0"):
+		update_notes.append(_t("update.photo_streets"))
+		update_notes.append(_t("update.gyro"))
+		update_notes.append(_t("update.buttons"))
 
 
 func _t(key: String) -> String:

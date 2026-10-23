@@ -3,8 +3,25 @@
 ## Pooled by TrackManager: the node is never freed, only re-positioned and given
 ## a different (cached) mesh. The mesh itself is shared between chunks with the
 ## same layout + variant slot, so recycling allocates nothing.
+##
+## Materials are bound by NAME, not by index: `SegmentBuilder.build()` writes the
+## list of surfaces it actually emitted into the mesh meta `"surfaces"`, so a
+## variant that has no river (or no steel truss) never ends up painted with the
+## wrong texture.
 class_name TrackSegment
 extends Node3D
+
+## Surface name -> material factory. Photographic surfaces come from the
+## reference photos in `art_src/` via `tools/build_textures.py`.
+const MATERIALS := {
+	"road": "asphalt_photo_material",
+	"walk": "pavement_photo_material",
+	"facade": "facade_material",
+	"water": "water_photo_material",
+	"steel": "steel_truss_material",
+	"concrete": "concrete_photo_material",
+	"ground": "sand_material",
+}
 
 var variant: int = 0
 var mesh_slot: int = 0
@@ -29,12 +46,42 @@ func apply(new_variant: int, new_slot: int, density: float) -> void:
 
 
 func _apply_materials() -> void:
-	_mesh_instance.set_surface_override_material(0, MeshKit.road_material())
-	_mesh_instance.set_surface_override_material(1, MeshKit.concrete_material())
-	var vertex_mat := MeshKit.vertex_material_cheap() if Perf.tier == Perf.Tier.LOW \
-			else MeshKit.vertex_material()
-	_mesh_instance.set_surface_override_material(2, vertex_mat)
-	_mesh_instance.set_surface_override_material(3, MeshKit.sand_material())
+	var mesh := _mesh_instance.mesh
+	if mesh == null:
+		return
+	var names: PackedStringArray = []
+	if mesh.has_meta("surfaces"):
+		names = mesh.get_meta("surfaces")
+	for i in range(mesh.get_surface_count()):
+		var surface_name := String(names[i]) if i < names.size() else "art"
+		_mesh_instance.set_surface_override_material(i, _material_for(surface_name))
+
+
+func _material_for(surface_name: String) -> Material:
+	# Vertex-coloured props: the only surface that changes with the tier.
+	if surface_name == "art" or not MATERIALS.has(surface_name):
+		return MeshKit.vertex_material_cheap() if Perf.tier == Perf.Tier.LOW \
+				else MeshKit.vertex_material()
+	# Photo surfaces keep their albedo on every tier (a vertex-coloured road
+	# would be flat white); the per-material cost is dropped instead — the
+	# asphalt/pavement materials skip their normal map below HIGH, which is the
+	# expensive part on a weak GPU.
+	match surface_name:
+		"road":
+			return MeshKit.asphalt_photo_material()
+		"walk":
+			return MeshKit.pavement_photo_material()
+		"facade":
+			return MeshKit.facade_material()
+		"water":
+			return MeshKit.water_photo_material()
+		"steel":
+			return MeshKit.steel_truss_material()
+		"concrete":
+			return MeshKit.concrete_photo_material()
+		"ground":
+			return MeshKit.sand_material()
+	return MeshKit.vertex_material()
 
 
 func refresh_materials() -> void:

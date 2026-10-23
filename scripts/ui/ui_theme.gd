@@ -87,6 +87,34 @@ static func build() -> Theme:
 	theme.set_font_size("font_size", "ChipButton", 18)
 	theme.set_constant("h_separation", "ChipButton", 6)
 
+	# --- on-screen game pads ------------------------------------------------
+	# Round, translucent, tinted by function: red = jump (up), green = slide
+	# (down), neutral = steer. 96 px targets so they work with a thumb while the
+	# other hand holds the phone.
+	theme.set_type_variation("PadButton", "Button")
+	theme.set_stylebox("normal", "PadButton", _pad_style(Color(1, 1, 1, 0.10)))
+	theme.set_stylebox("hover", "PadButton", _pad_style(Color(1, 1, 1, 0.20)))
+	theme.set_stylebox("pressed", "PadButton", _pad_style(GOLD))
+	theme.set_stylebox("focus", "PadButton", _pad_style(Color(0, 0, 0, 0)))
+	theme.set_color("font_color", "PadButton", TEXT)
+	theme.set_color("font_pressed_color", "PadButton", INK)
+	theme.set_font("font", "PadButton", bold)
+	theme.set_font_size("font_size", "PadButton", 40)
+
+	theme.set_type_variation("JumpButton", "PadButton")
+	theme.set_stylebox("normal", "JumpButton", _pad_style(RED * Color(1, 1, 1, 0.55)))
+	theme.set_stylebox("hover", "JumpButton", _pad_style(RED * Color(1, 1, 1, 0.75)))
+	theme.set_stylebox("pressed", "JumpButton", _pad_style(RED))
+	theme.set_font("font", "JumpButton", bold)
+	theme.set_font_size("font_size", "JumpButton", 20)
+
+	theme.set_type_variation("SlideButton", "PadButton")
+	theme.set_stylebox("normal", "SlideButton", _pad_style(GREEN * Color(1, 1, 1, 0.55)))
+	theme.set_stylebox("hover", "SlideButton", _pad_style(GREEN * Color(1, 1, 1, 0.75)))
+	theme.set_stylebox("pressed", "SlideButton", _pad_style(GREEN))
+	theme.set_font("font", "SlideButton", bold)
+	theme.set_font_size("font_size", "SlideButton", 20)
+
 	# --- labels variations --------------------------------------------------
 	theme.set_type_variation("TitleLabel", "Label")
 	theme.set_font("font", "TitleLabel", bold)
@@ -118,6 +146,21 @@ static func build() -> Theme:
 	theme.set_stylebox("panel", "PopupPanel", _panel(PANEL_BG_SOLID, GOLD, 18, 2))
 	theme.set_stylebox("panel", "ScrollContainer", _panel(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 0, 0))
 	return theme
+
+
+## Circular translucent style used by the in-game pads.
+static func _pad_style(fill: Color) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = fill
+	sb.set_corner_radius_all(48)
+	sb.set_border_width_all(2)
+	sb.border_color = Color(1, 1, 1, 0.28)
+	sb.content_margin_left = 6
+	sb.content_margin_right = 6
+	sb.content_margin_top = 6
+	sb.content_margin_bottom = 6
+	sb.anti_aliasing = true
+	return sb
 
 
 static func _panel(bg: Color, border: Color, radius: int, border_width: int) -> StyleBoxFlat:

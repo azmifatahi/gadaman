@@ -40,7 +40,9 @@ var shadow_distance: float = 40.0
 var fog_density: float = 0.010
 var fog_depth_begin: float = 45.0
 var fog_depth_end: float = 190.0
-var fog_color: Color = Color(0.62, 0.55, 0.58)
+## Matches the horizon haze of the Khartoum sunset photo; a purple-grey fog on a
+## warm photographic sky reads as dirt on the lens.
+var fog_color: Color = Color(0.66, 0.55, 0.47)
 var prop_density: float = 1.0
 var particle_amount: float = 1.0
 var draw_distance: float = 230.0

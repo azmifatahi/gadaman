@@ -90,6 +90,19 @@ jobs:
             exit 1
           }
 
+      - name: Verify streets + settings (strict)
+        run: |
+          # The procedural world cannot be reviewed from a diff: this builds all
+          # 7 districts, checks each photographic surface has UVs and that the
+          # lane-control/district settings round-trip.
+          set -o pipefail
+          timeout 180 godot --headless --script tools/ci_world_check.gd 2>&1 \
+            | tee world_check.log | tail -n 40
+          grep -q "\[CIWorld\] OK" world_check.log || {
+            echo "::error::procedural streets failed validation"
+            exit 1
+          }
+
       - name: Probe hero animation (strict)
         run: |
           # Data checks are not enough: this instantiates the scene in a real

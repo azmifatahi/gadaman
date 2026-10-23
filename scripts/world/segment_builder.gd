@@ -10,7 +10,15 @@
 ##   1 MARKET LANE      - vendor stalls, crates, canopies, hanging bulbs
 ##   2 NILE CORNICHE    - river on one side, railing, palms
 ##   3 NEIGHBOURHOOD    - mud brick walls, gates, water tanks, laundry
-##   4 BLUE NILE BRIDGE - water on both sides, steel railings, flag banners
+##   4 MAC NIMIR BRIDGE - riveted steel truss, concrete piers, open Nile
+##   5 SHAMBAT BRIDGE   - concrete beam deck, tall piers, river haze
+##   6 OLD BAHRI        - two-storey colonial shopfronts, balconies, laundry
+##
+## Surfaces (v1.3.0): every segment is a mesh whose surfaces are described by
+## the meta key "surfaces", so TrackSegment can bind the right material to the
+## right index without hard-coding numbers. Photographic surfaces (road,
+## pavement, facades, water, steel, concrete) carry world-space UVs; the
+## remaining "art" surface still uses cheap vertex colours for small props.
 class_name SegmentBuilder
 extends RefCounted
 
@@ -19,7 +27,7 @@ const ROAD_HALF := 4.2          # asphalt half width (3 lanes * 2.4 m + shoulder
 const WALK := 1.7               # sidewalk width
 const INNER := ROAD_HALF + WALK # where buildings start
 
-const VARIANT_COUNT := 5
+const VARIANT_COUNT := 7
 const CACHE_SLOTS := 3          # three mesh variants per layout for variety
 
 const PALETTE := {
@@ -54,8 +62,15 @@ const PALETTE := {
 
 static var _cache: Dictionary = {}
 
+## Surface order used by every segment mesh. TrackSegment maps these names to
+## materials; adding a surface here is all it takes to give the street a new
+## photographic material.
+const SURFACES := ["road", "walk", "art", "ground", "facade", "water",
+	"steel", "concrete"]
 
-## Returns a mesh with surface 0 = road, 1 = scenery, 2 = sand ground.
+
+## Returns an ArrayMesh whose surfaces follow `SURFACES` (empty surfaces are
+## omitted, and `mesh.set_meta("surfaces", [...])` records what is present).
 static func build(variant: int, slot: int, density: float) -> ArrayMesh:
 	var key := "%d_%d_%.2f" % [variant, slot, density]
 	if _cache.has(key):
@@ -64,33 +79,49 @@ static func build(variant: int, slot: int, density: float) -> ArrayMesh:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7919 * (slot + 1) + 104729 * variant
 
-	var road := MeshKit.begin()
-	var walkways := MeshKit.begin()
-	var art := MeshKit.begin()
-	var ground := MeshKit.begin()
+	var tools := {
+		"road": MeshKit.begin(),
+		"walk": MeshKit.begin(),
+		"art": MeshKit.begin(),
+		"ground": MeshKit.begin(),
+		"facade": MeshKit.begin(),
+		"water": MeshKit.begin(),
+		"steel": MeshKit.begin(),
+		"concrete": MeshKit.begin(),
+	}
 
-	_build_ground(ground)
-	_build_road(road, rng)
-	_build_walkways(walkways)
+	_build_ground(tools["ground"], variant % VARIANT_COUNT)
+	_build_road(tools["road"], tools["art"], rng)
+	_build_walkways(tools["walk"], tools["art"])
 
 	match variant % VARIANT_COUNT:
 		0:
-			_build_street(art, rng, density)
+			_build_street(tools, rng, density)
 		1:
-			_build_market(art, rng, density)
+			_build_market(tools, rng, density)
 		2:
-			_build_corniche(art, rng, density)
+			_build_corniche(tools, rng, density)
 		3:
-			_build_neighbourhood(art, rng, density)
+			_build_neighbourhood(tools, rng, density)
+		4:
+			_build_mac_nimir(tools, rng, density)
+		5:
+			_build_shambat(tools, rng, density)
 		_:
-			_build_bridge(art, rng, density)
+			_build_bahri(tools, rng, density)
 
-	_build_flags(art, rng, density)
+	_build_flags(tools["art"], rng, density)
 
-	var mesh := road.commit()
-	walkways.commit(mesh)
-	art.commit(mesh)
-	ground.commit(mesh)
+	var mesh := ArrayMesh.new()
+	var present := PackedStringArray()
+	for name in SURFACES:
+		var st: SurfaceTool = tools[name]
+		var built := st.commit()
+		if built == null or built.get_surface_count() == 0:
+			continue
+		mesh.append_from(built, 0, Transform3D())
+		present.append(name)
+	mesh.set_meta("surfaces", present)
 	_cache[key] = mesh
 	return mesh
 
@@ -102,67 +133,103 @@ static func clear_cache() -> void:
 # ---------------------------------------------------------------------------
 # Ground / road
 # ---------------------------------------------------------------------------
-static func _build_ground(st: SurfaceTool) -> void:
-	var h := LENGTH * 0.5
-	MeshKit.add_quad(st, Vector3(-160, -0.06, h), Vector3(160, -0.06, h),
-			Vector3(160, -0.06, -h), Vector3(-160, -0.06, -h), Color.WHITE, 14.0)
+## Sand ground around the street.
+##
+## The river variants must NOT get one full-width slab: it sits at y = -0.06 and
+## would cover the water at y = -1.55, which is why the corniche used to look
+## like a wall of sand instead of the Nile. Each variant therefore lists the
+## spans that are actually dry land.
+static func _build_ground(st: SurfaceTool, variant: int) -> void:
+	match variant:
+		2:
+			# Corniche: the Nile is on the left, so the city keeps its ground on
+			# the right and the far shore is a separate bank across the water.
+			_ground_span(st, INNER, 170.0, -0.06)
+			_ground_span(st, -170.0, -80.0, -1.4)
+		4, 5:
+			# Bridges: water on both sides, banks beyond the 80 m channel.
+			_ground_span(st, 80.0, 170.0, -1.4)
+			_ground_span(st, -170.0, -80.0, -1.4)
+		_:
+			_ground_span(st, -170.0, 170.0, -0.06)
 
 
-static func _build_road(st: SurfaceTool, rng: RandomNumberGenerator) -> void:
+static func _ground_span(st: SurfaceTool, x0: float, x1: float, y: float) -> void:
+	if is_equal_approx(x0, x1):
+		return
 	var h := LENGTH * 0.5
-	# Main asphalt slab.
-	MeshKit.add_quad(st, Vector3(-ROAD_HALF, 0, h), Vector3(ROAD_HALF, 0, h),
-			Vector3(ROAD_HALF, 0, -h), Vector3(-ROAD_HALF, 0, -h), Color.WHITE, 1.0)
+	MeshKit.add_uv_ground(st, Vector3(x0, y, h), Vector3(x1, y, h),
+			Vector3(x1, y, -h), Vector3(x0, y, -h), 9.0)
+
+
+## `st` paints the photographic asphalt; `paint_st` carries the flat, vertex
+## coloured markings (lane dashes, crosswalks, sand drifts) which must not be
+## textured with the asphalt photo.
+static func _build_road(st: SurfaceTool, paint_st: SurfaceTool,
+		rng: RandomNumberGenerator) -> void:
+	var h := LENGTH * 0.5
+	# Main asphalt slab: world-space UVs so the photo grain keeps a real 2.4 m
+	# per tile scale instead of stretching with the segment.
+	MeshKit.add_uv_ground(st, Vector3(-ROAD_HALF, 0, h), Vector3(ROAD_HALF, 0, h),
+			Vector3(ROAD_HALF, 0, -h), Vector3(-ROAD_HALF, 0, -h), 2.4)
 	# Dashed lane dividers between the three lanes (x = +-1.2).
 	var paint := Color("#e8e3d3")
 	var z := -h
 	while z < h:
 		for lane_edge: float in [-1.2, 1.2]:
-			_add_flat_box(st, Vector3(lane_edge, 0.03, z + 1.5), Vector3(0.16, 0.012, 2.6),
-					paint)
+			_add_flat_box(paint_st, Vector3(lane_edge, 0.03, z + 1.5),
+					Vector3(0.16, 0.012, 2.6), paint)
 		z += 5.6
 	# Occasional crosswalk / speed bump paint for rhythm.
 	if rng.randf() < 0.5:
 		var cz := rng.randf_range(-h + 6.0, h - 6.0)
 		for i in 7:
-			_add_flat_box(st, Vector3(-3.6 + float(i) * 1.2, 0.013, cz),
+			_add_flat_box(paint_st, Vector3(-3.6 + float(i) * 1.2, 0.013, cz),
 					Vector3(0.55, 0.01, 1.8), paint)
 	# Sand drifts on the shoulder (Khartoum streets are never fully clean).
 	for i in 6:
 		var side := -1.0 if i % 2 == 0 else 1.0
 		var px := side * rng.randf_range(3.4, ROAD_HALF - 0.3)
 		var pz := rng.randf_range(-h, h)
-		_add_flat_box(st, Vector3(px, 0.008, pz),
+		_add_flat_box(paint_st, Vector3(px, 0.008, pz),
 				Vector3(rng.randf_range(0.6, 1.6), 0.006, rng.randf_range(0.8, 2.4)),
 				PALETTE["sand"])
 
 
-static func _build_walkways(st: SurfaceTool) -> void:
+static func _build_walkways(st: SurfaceTool, curb_st: SurfaceTool) -> void:
 	var h := LENGTH * 0.5
 	var concrete := Color("#b8ac97")
 	var curb := Color("#b6ac9a")
 	for side: float in [-1.0, 1.0]:
 		var x_in := side * ROAD_HALF
 		var x_out := side * INNER
-		MeshKit.add_quad(st, Vector3(x_in, 0.16, h), Vector3(x_out, 0.16, h),
-				Vector3(x_out, 0.16, -h), Vector3(x_in, 0.16, -h), concrete)
-		# Curb face toward the road.
-		MeshKit.add_quad(st, Vector3(x_in, 0.0, h), Vector3(x_in, 0.16, h),
+		MeshKit.add_uv_ground(st, Vector3(x_in, 0.16, h), Vector3(x_out, 0.16, h),
+				Vector3(x_out, 0.16, -h), Vector3(x_in, 0.16, -h), 2.0)
+		# Curb face toward the road (vertex-coloured: it is a 16 cm strip, and a
+		# stretched photo there would smear).
+		MeshKit.add_quad(curb_st, Vector3(x_in, 0.0, h), Vector3(x_in, 0.16, h),
 				Vector3(x_in, 0.16, -h), Vector3(x_in, 0.0, -h), curb)
+		# Outer skirt down to the sand, otherwise the raised walkway edge shows
+		# a 22 cm slit of sky between the pavement and the ground plane.
+		MeshKit.add_quad(curb_st, Vector3(x_out, 0.16, h), Vector3(x_out, -0.06, h),
+				Vector3(x_out, -0.06, -h), Vector3(x_out, 0.16, -h), concrete)
 
 
 
 # ---------------------------------------------------------------------------
 # Variant 0: Khartoum street
 # ---------------------------------------------------------------------------
-static func _build_street(st: SurfaceTool, rng: RandomNumberGenerator, density: float) -> void:
+static func _build_street(tools: Dictionary, rng: RandomNumberGenerator, density: float) -> void:
+	var st: SurfaceTool = tools["art"]
+	var facade: SurfaceTool = tools["facade"]
 	for side: float in [-1.0, 1.0]:
 		var z := -LENGTH * 0.5
 		while z < LENGTH * 0.5 - 3.0:
 			var span := rng.randf_range(7.0, 12.0)
 			var skip := density < 0.75 and rng.randf() < 0.35
 			if not skip:
-				_building(st, rng, side, z + span * 0.5, span)
+				_building_into(st, facade, rng, side, z + span * 0.5, span,
+						rng.randi_range(0, 2), 1.0)
 			z += span + rng.randf_range(0.5, 2.5)
 		# Street furniture along the curb.
 		for i in 3:
@@ -178,6 +245,13 @@ static func _build_street(st: SurfaceTool, rng: RandomNumberGenerator, density: 
 
 static func _building(st: SurfaceTool, rng: RandomNumberGenerator, side: float,
 		z_center: float, z_span: float) -> void:
+	_building_into(st, null, rng, side, z_center, z_span, 0, 0.0)
+
+
+## Textured building. `facade` may be null (pure vertex-colour body).
+static func _building_into(st: SurfaceTool, facade: SurfaceTool,
+		rng: RandomNumberGenerator, side: float, z_center: float, z_span: float,
+		facade_tile: int, texture_scale: float) -> void:
 	var depth := rng.randf_range(5.0, 9.0)
 	var height := rng.randf_range(4.0, 12.0)
 	var colors := [PALETTE["wall_a"], PALETTE["wall_b"], PALETTE["wall_c"], PALETTE["wall_d"]]
@@ -195,26 +269,38 @@ static func _building(st: SurfaceTool, rng: RandomNumberGenerator, side: float,
 	MeshKit.add_cylinder(st, Vector3(x_center - side * 1.6, height + 0.34, z_center - 1.4),
 			0.45, 1.0, Color("#5f5f5f"), 8)
 
-	# Facade: windows + shutters on the inner face.
+	# Facade: a photographic panel when the caller supplied a facade surface,
+	# otherwise the old flat window grid (low tier without photo textures).
 	var face_x: float = x_inner + side * 0.03
-	var rows := int(maxf(1.0, floor((height - 2.6) / 2.6)))
-	for row in rows:
-		var wy := 2.6 + float(row) * 2.6
-		if wy > height - 1.2:
-			break
-		var cols := int(maxf(1.0, floor(z_span / 2.6)))
-		for col in cols:
-			var wz := z_center - z_span * 0.5 + 1.5 + float(col) * 2.6
-			if wz > z_center + z_span * 0.5 - 0.8:
+	if facade != null:
+		# One photographic panel per building, mapped exactly once across the
+		# span. Culling is disabled on the facade material, so the same winding
+		# is correct on both sides of the street (Godot flips the normal on back
+		# faces automatically).
+		MeshKit.add_facade_panel(facade,
+				Vector3(face_x, 0.16, z_center - z_span * 0.5),
+				Vector3(0, 0, 1), z_span, height - 0.2, facade_tile)
+		# A shaded ground-floor recess sells the depth of the photo.
+		MeshKit.add_box(st, Vector3(face_x + side * 0.05, 1.3, z_center),
+				Vector3(0.14, 1.4, z_span * 0.42), Color("#16181c"))
+	else:
+		var rows := int(maxf(1.0, floor((height - 2.6) / 2.6)))
+		for row in rows:
+			var wy := 2.6 + float(row) * 2.6
+			if wy > height - 1.2:
 				break
-			MeshKit.add_box(st, Vector3(face_x, wy, wz), Vector3(0.1, 1.25, 1.15),
-					PALETTE["dark"])
-			if rng.randf() < 0.5:
-				MeshKit.add_box(st, Vector3(face_x + side * 0.06, wy, wz),
-						Vector3(0.06, 1.35, 0.2), PALETTE["shutter"])
-	# Ground floor shop: dark opening + awning bars.
-	MeshKit.add_box(st, Vector3(face_x, 1.35, z_center), Vector3(0.12, 2.3, z_span * 0.6),
-			Color("#1b1e22"))
+			var cols := int(maxf(1.0, floor(z_span / 2.6)))
+			for col in cols:
+				var wz := z_center - z_span * 0.5 + 1.5 + float(col) * 2.6
+				if wz > z_center + z_span * 0.5 - 0.8:
+					break
+				MeshKit.add_box(st, Vector3(face_x, wy, wz), Vector3(0.1, 1.25, 1.15),
+						PALETTE["dark"])
+				if rng.randf() < 0.5:
+					MeshKit.add_box(st, Vector3(face_x + side * 0.06, wy, wz),
+							Vector3(0.06, 1.35, 0.2), PALETTE["shutter"])
+		MeshKit.add_box(st, Vector3(face_x, 1.35, z_center),
+				Vector3(0.12, 2.3, z_span * 0.6), Color("#1b1e22"))
 
 
 static func _shop_awning(st: SurfaceTool, side: float, z: float,
@@ -263,11 +349,17 @@ static func _parked_car(st: SurfaceTool, side: float, z: float,
 # ---------------------------------------------------------------------------
 # Variant 1: market lane
 # ---------------------------------------------------------------------------
-static func _build_market(st: SurfaceTool, rng: RandomNumberGenerator, density: float) -> void:
+static func _build_market(tools: Dictionary, rng: RandomNumberGenerator, density: float) -> void:
+	var st: SurfaceTool = tools["art"]
+	var facade: SurfaceTool = tools["facade"]
 	for side: float in [-1.0, 1.0]:
-		# A low back wall so stalls read against something solid.
+		# A low back wall so stalls read against something solid, with a
+		# photographic shopfront strip above it.
 		MeshKit.add_box(st, Vector3(side * (INNER + 3.2), 2.2, 0),
 				Vector3(6.0, 4.4, LENGTH), PALETTE["wall_b"].darkened(0.05))
+		MeshKit.add_facade_panel(facade,
+				Vector3(side * (INNER + 0.18), 4.5, -LENGTH * 0.5),
+				Vector3(0, 0, 1), LENGTH, 3.4, 0)
 		var z := -LENGTH * 0.5 + 3.0
 		while z < LENGTH * 0.5 - 3.0:
 			if rng.randf() < density:
@@ -318,12 +410,14 @@ static func _stall(st: SurfaceTool, side: float, z: float,
 # ---------------------------------------------------------------------------
 # Variant 2: Nile corniche
 # ---------------------------------------------------------------------------
-static func _build_corniche(st: SurfaceTool, rng: RandomNumberGenerator,
+static func _build_corniche(tools: Dictionary, rng: RandomNumberGenerator,
 		density: float) -> void:
+	var st: SurfaceTool = tools["art"]
+	var facade: SurfaceTool = tools["facade"]
 	# River to the left, city to the right.
-	_water(st, -1.0)
+	_water(tools["water"], tools["concrete"], -1.0)
 	for side: float in [1.0]:
-		_wall_row(st, side, rng, density)
+		_wall_row(st, facade, side, rng, density)
 	# Corniche railing + palms on the river side.
 	var z := -LENGTH * 0.5 + 2.0
 	while z < LENGTH * 0.5:
@@ -342,26 +436,31 @@ static func _build_corniche(st: SurfaceTool, rng: RandomNumberGenerator,
 				Color("#8d949b"))
 
 
-static func _wall_row(st: SurfaceTool, side: float, rng: RandomNumberGenerator,
-		density: float) -> void:
+static func _wall_row(st: SurfaceTool, facade: SurfaceTool, side: float,
+		rng: RandomNumberGenerator, density: float) -> void:
 	var z := -LENGTH * 0.5
 	while z < LENGTH * 0.5 - 4.0:
 		var span := rng.randf_range(9.0, 14.0)
 		if rng.randf() < 0.85 * maxf(density, 0.6):
-			_building(st, rng, side, z + span * 0.5, span)
+			_building_into(st, facade, rng, side, z + span * 0.5, span,
+					rng.randi_range(0, 2), 1.0)
 		z += span + rng.randf_range(2.0, 4.0)
 
 
-static func _water(st: SurfaceTool, side: float) -> void:
+static func _water(st: SurfaceTool, embankment: SurfaceTool, side: float) -> void:
 	var h := LENGTH * 0.5
 	var x0: float = side * (INNER + 0.1)
 	var x1: float = side * 80.0
-	MeshKit.add_quad(st, Vector3(x0, -1.55, h), Vector3(x1, -1.55, h),
-			Vector3(x1, -1.55, -h), Vector3(x0, -1.55, -h), PALETTE["water"])
-	# Embankment wall.
+	# Photographic Nile surface, UVs in world metres so the ripples do not
+	# stretch along a 40 m chunk.
+	MeshKit.add_uv_ground(st, Vector3(x0, -1.55, h), Vector3(x1, -1.55, h),
+			Vector3(x1, -1.55, -h), Vector3(x0, -1.55, -h), 18.0)
+	# Embankment wall (concrete photo).
 	var wx: float = side * (INNER + 0.05)
-	MeshKit.add_quad(st, Vector3(wx, -1.6, h), Vector3(wx, 0.1, h), Vector3(wx, 0.1, -h),
-			Vector3(wx, -1.6, -h), PALETTE["stone"])
+	MeshKit.add_uv_quad(embankment, Vector3(wx, -1.6, h), Vector3(wx, 0.1, h),
+			Vector3(wx, 0.1, -h), Vector3(wx, -1.6, -h),
+			Vector2(0, 0), Vector2(0, 1.6 / 6.0), Vector2(LENGTH / 6.0, 1.6 / 6.0),
+			Vector2(LENGTH / 6.0, 0), Color.WHITE)
 
 
 static func _railing(st: SurfaceTool, side: float, z: float, span: float, height: float) -> void:
@@ -393,13 +492,15 @@ static func _palm(st: SurfaceTool, base: Vector3, rng: RandomNumberGenerator) ->
 # ---------------------------------------------------------------------------
 # Variant 3: dusty neighbourhood
 # ---------------------------------------------------------------------------
-static func _build_neighbourhood(st: SurfaceTool, rng: RandomNumberGenerator,
+static func _build_neighbourhood(tools: Dictionary, rng: RandomNumberGenerator,
 		density: float) -> void:
+	var st: SurfaceTool = tools["art"]
+	var facade: SurfaceTool = tools["facade"]
 	for side: float in [-1.0, 1.0]:
 		var z := -LENGTH * 0.5
 		while z < LENGTH * 0.5 - 6.0:
 			var span := rng.randf_range(8.0, 13.0)
-			_compound_wall(st, side, z + span * 0.5, span, rng)
+			_compound_wall(st, facade, side, z + span * 0.5, span, rng)
 			z += span + rng.randf_range(1.5, 4.0)
 		for i in 3:
 			var fz := -LENGTH * 0.5 + 5.0 + float(i) * 12.0 + rng.randf_range(-2.0, 2.0)
@@ -418,8 +519,8 @@ static func _build_neighbourhood(st: SurfaceTool, rng: RandomNumberGenerator,
 						Vector3(0.04, 0.8, 0.7), col)
 
 
-static func _compound_wall(st: SurfaceTool, side: float, z_center: float, z_span: float,
-		rng: RandomNumberGenerator) -> void:
+static func _compound_wall(st: SurfaceTool, facade: SurfaceTool, side: float,
+		z_center: float, z_span: float, rng: RandomNumberGenerator) -> void:
 	var x: float = side * (INNER + 0.35)
 	var h := rng.randf_range(2.0, 2.8)
 	MeshKit.add_box(st, Vector3(x, h * 0.5 + 0.16, z_center), Vector3(0.45, h, z_span),
@@ -436,6 +537,10 @@ static func _compound_wall(st: SurfaceTool, side: float, z_center: float, z_span
 	var house_x: float = x + side * 3.5
 	MeshKit.add_box(st, Vector3(house_x, house_h * 0.5 + 0.16, z_center),
 			Vector3(6.0, house_h, z_span * 0.8), PALETTE["wall_a"])
+	# Photographic plaster panel on the road-facing wall of the house.
+	MeshKit.add_facade_panel(facade,
+			Vector3(house_x - side * 3.02, 0.16, z_center - z_span * 0.4),
+			Vector3(0, 0, 1), z_span * 0.8, house_h - 0.2, 2)
 	MeshKit.add_box(st, Vector3(house_x, house_h + 0.3, z_center),
 			Vector3(6.2, 0.3, z_span * 0.8), PALETTE["roof"])
 	for i in 3:
@@ -448,32 +553,171 @@ static func _compound_wall(st: SurfaceTool, side: float, z_center: float, z_span
 
 
 # ---------------------------------------------------------------------------
-# Variant 4: Blue Nile bridge
+# Variant 4: Mac Nimir bridge (the riveted steel truss over the Blue Nile)
 # ---------------------------------------------------------------------------
-static func _build_bridge(st: SurfaceTool, rng: RandomNumberGenerator,
+## Built from the reference photograph in `art_src/bridge_mac_nimir.jpg`:
+## deep steel truss girders on both sides, riveted cross-bracing overhead,
+## weathered concrete piers standing in the river.
+static func _build_mac_nimir(tools: Dictionary, rng: RandomNumberGenerator,
 		density: float) -> void:
+	var steel: SurfaceTool = tools["steel"]
+	var concrete: SurfaceTool = tools["concrete"]
+	var art: SurfaceTool = tools["art"]
+	_water(tools["water"], concrete, -1.0)
+	_water(tools["water"], concrete, 1.0)
+
+	var h := LENGTH * 0.5
 	for side: float in [-1.0, 1.0]:
-		_water(st, side)
-		var x: float = side * (INNER - 0.2)
-		# Stone parapet + steel railing.
-		MeshKit.add_box(st, Vector3(x, 0.45, 0), Vector3(0.6, 0.6, LENGTH), PALETTE["stone"])
-		MeshKit.add_box(st, Vector3(x, 0.95, 0), Vector3(0.5, 0.06, LENGTH), PALETTE["white"])
-		var z := -LENGTH * 0.5
-		while z < LENGTH * 0.5:
-			_railing(st, side, z + 1.5, 3.0, 1.0)
-			z += 3.0
-	# Overhead flag banners - signature shot for the trailer.
-	for i in 3:
-		var bz := -LENGTH * 0.5 + 6.0 + float(i) * 13.0
+		var x: float = side * (INNER - 0.15)
+		# Deck edge beam + parapet (concrete).
+		MeshKit.add_uv_quad(concrete, Vector3(x, 0.0, h), Vector3(x, 0.6, h),
+				Vector3(x, 0.6, -h), Vector3(x, 0.0, -h),
+				Vector2(0, 0), Vector2(LENGTH / 6.0, 0), Vector2(LENGTH / 6.0, 0.1),
+				Vector2(0, 0.1), Color.WHITE)
+		# Truss: top chord, bottom chord, verticals and diagonals.
+		_truss_span(steel, side, -h, h)
+		# Stone parapet cap above the deck.
+		MeshKit.add_box(art, Vector3(x + side * 0.1, 0.78, 0), Vector3(0.34, 0.18, LENGTH),
+				PALETTE["stone"])
+
+	# Concrete piers standing in the river (outside the drivable lanes).
+	var pier_x := INNER + 6.0
+	for pz: float in [-h + 8.0, 0.0, h - 8.0]:
 		for side: float in [-1.0, 1.0]:
-			MeshKit.add_box(st, Vector3(side * (INNER - 0.3), 3.2, bz),
-					Vector3(0.18, 6.0, 0.18), PALETTE["metal"])
-		MeshKit.add_box(st, Vector3(0, 6.0, bz), Vector3((INNER - 0.3) * 2.0, 0.1, 0.1),
+			MeshKit.add_uv_quad(concrete,
+					Vector3(side * pier_x, -2.2, pz + 2.4),
+					Vector3(side * pier_x, 0.0, pz + 2.4),
+					Vector3(side * pier_x, 0.0, pz - 2.4),
+					Vector3(side * pier_x, -2.2, pz - 2.4),
+					Vector2(0, 0), Vector2(4.8 / 6.0, 0), Vector2(4.8 / 6.0, 2.2 / 6.0),
+					Vector2(0, 2.2 / 6.0), Color.WHITE)
+
+	# Overhead banner gantries - the trailer shot, kept sparse.
+	if density > 0.6:
+		for i in 2:
+			var bz := -h + 10.0 + float(i) * 18.0
+			for side: float in [-1.0, 1.0]:
+				MeshKit.add_box(art, Vector3(side * (INNER - 0.3), 3.4, bz),
+						Vector3(0.16, 6.4, 0.16), PALETTE["metal"])
+			MeshKit.add_box(art, Vector3(0, 6.5, bz), Vector3((INNER - 0.3) * 2.0, 0.09, 0.09),
+					PALETTE["metal"])
+			for k in 3:
+				MeshKit.add_flag_panel(art, Vector3(-2.6 + float(k) * 2.6 - 1.3, 4.2, bz),
+						2.6, 1.7)
+
+
+## One side of a riveted steel truss, 6.5 m tall, made of textured box chords.
+static func _truss_span(st: SurfaceTool, side: float, z_start: float, z_end: float) -> void:
+	var x: float = side * (INNER - 0.45)
+	var top := 6.4
+	var bottom := 1.15
+	# Chords: long textured strips so the rivet pattern from the photo shows.
+	for chord_y: float in [top, bottom]:
+		MeshKit.add_uv_quad(st, Vector3(x, chord_y - 0.28, z_start),
+				Vector3(x, chord_y + 0.28, z_start),
+				Vector3(x, chord_y + 0.28, z_end),
+				Vector3(x, chord_y - 0.28, z_end),
+				Vector2(0, 0), Vector2(0, 0.56 / 2.0),
+				Vector2(absf(z_end - z_start) / 2.0, 0.56 / 2.0),
+				Vector2(absf(z_end - z_start) / 2.0, 0), Color.WHITE)
+	# Verticals + diagonals every 4 m (matches the 4 m panel of the texture).
+	var z := z_start
+	var i := 0
+	while z < z_end:
+		MeshKit.add_uv_quad(st, Vector3(x, bottom, z), Vector3(x, top, z),
+				Vector3(x, top, z + 0.34), Vector3(x, bottom, z + 0.34),
+				Vector2(0, 0), Vector2(0, 1), Vector2(0.17, 1), Vector2(0.17, 0),
+				Color.WHITE)
+		# Diagonal brace.
+		var z2 := minf(z + 4.0, z_end)
+		MeshKit.add_uv_quad(st, Vector3(x, bottom, z), Vector3(x, top, z2),
+				Vector3(x, top, z2 + 0.28), Vector3(x, bottom, z + 0.28),
+				Vector2(0, 0), Vector2(1, 1), Vector2(1.14, 1), Vector2(0.14, 0),
+				Color.WHITE)
+		z += 4.0
+		i += 1
+
+
+# ---------------------------------------------------------------------------
+# Variant 5: Shambat bridge (concrete beam deck, tall weathered piers)
+# ---------------------------------------------------------------------------
+static func _build_shambat(tools: Dictionary, rng: RandomNumberGenerator,
+		density: float) -> void:
+	var concrete: SurfaceTool = tools["concrete"]
+	var art: SurfaceTool = tools["art"]
+	_water(tools["water"], concrete, -1.0)
+	_water(tools["water"], concrete, 1.0)
+	var h := LENGTH * 0.5
+
+	for side: float in [-1.0, 1.0]:
+		var x: float = side * (INNER - 0.1)
+		# Solid concrete parapet, 1.1 m high: exactly the Shambat profile.
+		MeshKit.add_uv_quad(concrete, Vector3(x, 0.0, h), Vector3(x, 1.06, h),
+				Vector3(x, 1.06, -h), Vector3(x, 0.0, -h),
+				Vector2(0, 0), Vector2(0, 1.06 / 6.0), Vector2(LENGTH / 6.0, 1.06 / 6.0),
+				Vector2(LENGTH / 6.0, 0), Color.WHITE)
+		MeshKit.add_box(art, Vector3(x - side * 0.03, 1.12, 0), Vector3(0.3, 0.12, LENGTH),
+				PALETTE["white"])
+		# Simple steel handrail on top.
+		MeshKit.add_box(art, Vector3(x, 1.55, 0), Vector3(0.06, 0.06, LENGTH),
 				PALETTE["metal"])
-		var flag_w := 2.6
-		for k in 3:
-			var fx := -2.6 + float(k) * 2.6
-			MeshKit.add_flag_panel(st, Vector3(fx - flag_w * 0.5, 4.0, bz), flag_w, 1.7)
+		var z := -h
+		while z < h:
+			MeshKit.add_box(art, Vector3(x, 1.32, z + 1.5), Vector3(0.05, 0.5, 0.05),
+					PALETTE["metal"])
+			z += 3.0
+
+	# Lamp masts every 20 m - the bridge has them, and they catch the sunset.
+	for i in 3:
+		var lz := -h + 7.0 + float(i) * 14.0
+		for side: float in [-1.0, 1.0]:
+			MeshKit.add_cylinder(art, Vector3(side * (INNER - 0.6), 1.1, lz), 0.1, 6.2,
+					PALETTE["metal"], 6)
+			MeshKit.add_box(art, Vector3(side * (INNER - 1.1), 7.2, lz),
+					Vector3(1.0, 0.1, 0.1), PALETTE["metal"])
+			MeshKit.add_box(art, Vector3(side * (INNER - 1.5), 7.05, lz),
+					Vector3(0.4, 0.16, 0.3), Color("#ffe9b8"))
+
+
+# ---------------------------------------------------------------------------
+# Variant 6: old Bahri (colonial two-storey shopfronts)
+# ---------------------------------------------------------------------------
+static func _build_bahri(tools: Dictionary, rng: RandomNumberGenerator,
+		density: float) -> void:
+	var art: SurfaceTool = tools["art"]
+	var facade: SurfaceTool = tools["facade"]
+	for side: float in [-1.0, 1.0]:
+		var z := -LENGTH * 0.5
+		while z < LENGTH * 0.5 - 4.0:
+			var span := rng.randf_range(8.0, 13.0)
+			var two_storey := rng.randf() < 0.85
+			var height := rng.randf_range(7.0, 9.2) if two_storey else rng.randf_range(3.6, 4.6)
+			var x_inner: float = side * INNER
+			var depth := rng.randf_range(7.0, 10.0)
+			var x_center: float = x_inner + side * depth * 0.5
+			var tone: Color = [PALETTE["wall_a"], PALETTE["wall_c"],
+					PALETTE["wall_b"]][rng.randi_range(0, 2)]
+			MeshKit.add_box(art, Vector3(x_center, height * 0.5 + 0.16, z + span * 0.5),
+					Vector3(depth, height, span), tone.darkened(0.1))
+			# Deep cornice - the signature of the 1900s Bahri houses.
+			MeshKit.add_box(art, Vector3(x_inner + side * 0.35, height + 0.16, z + span * 0.5),
+					Vector3(0.9, 0.42, span + 0.2), tone.darkened(0.25))
+			# Photographic facade on the street side.
+			MeshKit.add_facade_panel(facade, Vector3(x_inner + side * 0.05, 0.16, z),
+					Vector3(0, 0, 1), span, height - 0.2, rng.randi_range(0, 2))
+			# Corrugated awning over the shop.
+			MeshKit.add_box(art, Vector3(x_inner - side * 0.85, 3.0, z + span * 0.5),
+					Vector3(1.8, 0.08, span * 0.9), PALETTE["metal"].darkened(0.2))
+			for k in 2:
+				MeshKit.add_box(art, Vector3(x_inner - side * 1.6, 1.5,
+						z + span * 0.5 - span * 0.3 + float(k) * span * 0.55),
+						Vector3(0.08, 3.0, 0.08), PALETTE["metal"].darkened(0.3))
+			z += span + rng.randf_range(2.0, 4.0)
+		# Acacias + a lamp, same rhythm as the reference photo.
+		for i in 2:
+			_acacia(art, side * (ROAD_HALF + 0.9),
+					-LENGTH * 0.5 + 10.0 + float(i) * 16.0, rng)
+		_lamp(art, side, -LENGTH * 0.5 + 6.0)
 
 
 # ---------------------------------------------------------------------------
