@@ -69,7 +69,22 @@ func _do_build(allow_fallback := true) -> bool:
 		return false
 	print("[HeroBuilder] Scanning %s" % arabic_dir)
 
+	# Short-circuit: without FBX2glTF on PATH, Godot's importer will hang
+	# trying to convert FBX files. GLB files can still be loaded. We check
+	# for any GLB first; if none and no FBX2glTF, bail out gracefully.
+	var have_glb := false
 	var files := _list_fbx(arabic_dir)
+	for f in files:
+		if f.to_lower().ends_with(".glb") or f.to_lower().ends_with(".gltf"):
+			have_glb = true
+	if not have_glb and not _fbx2gltf_available():
+		_issues.append("FBX2glTF not on PATH and no GLB supplied; cannot build hero headlessly")
+		if not allow_fallback:
+			push_error("[HeroBuilder] %s" % _issues[-1])
+			return false
+		push_warning("[HeroBuilder] %s (procedural model will be used)" % _issues[-1])
+		return false
+
 	if files.is_empty():
 		_issues.append("No FBX/GLB files in %s" % arabic_dir)
 		if not allow_fallback:
@@ -82,28 +97,39 @@ func _do_build(allow_fallback := true) -> bool:
 	var anim_clips := {}
 	for f in files:
 		var full := arabic_dir.path_join(f)
-		if _is_skin_fbx(full):
+		# Only treat FBX as skin if FBX2glTF is present, otherwise treat all
+		# FBX as unknown and look for GLB.
+		if (f.to_lower().ends_with(".fbx") and not _fbx2gltf_available()):
+			continue
+		if (f.to_lower().ends_with(".glb") or f.to_lower().ends_with(".gltf")) or _is_skin_fbx(full):
 			skin_path = full
 		else:
 			var key := _classify(f)
 			if key != "":
 				anim_clips[key] = full
 	if skin_path == "":
-		# Fallback: pick the largest file as the skin.
 		var largest_name := ""
 		var largest_size := -1
 		for f in files:
 			var fp := arabic_dir.path_join(f)
+			var is_fbx := f.to_lower().ends_with(".fbx")
+			if is_fbx and not _fbx2gltf_available():
+				continue
 			var sz := FileAccess.get_file_as_bytes(fp).size()
 			if sz > largest_size:
 				largest_size = sz
 				largest_name = f
 		skin_path = arabic_dir.path_join(largest_name)
+	if skin_path == "" or skin_path == arabic_dir.path_join(""):
+		_issues.append("No loadable skin mesh found")
+		if not allow_fallback:
+			push_error("[HeroBuilder] %s" % _issues[-1])
+			return false
+		push_warning("[HeroBuilder] %s" % _issues[-1])
+		return false
 	print("[HeroBuilder] skin = %s, clips = %s" % [skin_path.get_file(), anim_clips.keys()])
 
-	# Try to load the skin FBX (this may fail headlessly if FBX2glTF is
-	# unavailable). If load fails and we're allowed to fall back, return
-	# false without error so the procedural RunnerModel ships instead.
+	# Try to load the skin scene (FBX or GLB).
 	var skin_scene: PackedScene = null
 	if ResourceLoader.exists(skin_path):
 		skin_scene = load(skin_path)
@@ -154,6 +180,24 @@ func _mkdir(path: String) -> void:
 			if not da.dir_exists(cur):
 				da.make_dir(cur)
 			cur += "/"
+
+
+func _fbx2gltf_available() -> bool:
+	# Godot's FBX importer shells out to FBX2glTF at import time. Without the
+	# binary on PATH, load() on an FBX scene hangs indefinitely waiting for
+	# the child process. We detect availability up front and short-circuit.
+	var path_env := OS.get_environment("PATH", "")
+	for d in path_env.split(":"):
+		if d == "":
+			continue
+		var cand := d.rstrip("/") + "/FBX2glTF"
+		if FileAccess.file_exists(cand):
+			return true
+		# Some distros ship it lowercase.
+		var cand2 := d.rstrip("/") + "/fbx2gltf"
+		if FileAccess.file_exists(cand2):
+			return true
+	return false
 
 
 func _locate_arabic_folder() -> String:
