@@ -29,7 +29,7 @@ static var _mat_glass: StandardMaterial3D
 # first silently won and the street could render with the old texture.
 static var _mat_road_photo: StandardMaterial3D
 static var _mat_walk_photo: StandardMaterial3D
-static var _mat_facade: StandardMaterial3D
+static var _mat_facade: Array[StandardMaterial3D] = [null, null, null]
 static var _mat_water: StandardMaterial3D
 static var _mat_steel: StandardMaterial3D
 static var _mat_concrete_photo: StandardMaterial3D
@@ -83,20 +83,26 @@ static func add_uv_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: 
 ## `tile` selects one third of `facade_atlas.jpg`. The texture repeats vertically
 ## with a fixed 4 m period so windows keep a believable size on every building,
 ## while the horizontal extent always maps exactly once (no stretched windows).
+## Photographic facade panel, in *metres*.
+##
+## The old version mapped one third of the 3-tile atlas across the whole
+## building, which squashed an 8 m shopfront into a 1 m window and left the
+## horizontal slats that made the street look like a texture test. Here the UVs
+## are metric - one texture covers PANEL_W x PANEL_H metres - so a 12 m building
+## shows roughly one and a half shopfronts, exactly like the reference photo.
+const PANEL_W := 9.0          # metres covered by one full texture width
+const PANEL_H := 4.6          # metres covered by one full texture height
 static func add_facade_panel(st: SurfaceTool, origin: Vector3, right: Vector3,
-		width: float, height: float, tile: int, color: Color = Color.WHITE) -> void:
-	const TILES := 3
-	const PANEL_H := 4.0          # metres of wall covered by one texture height
-	var t := clampi(tile, 0, TILES - 1)
-	# 1.5 texel inset stops bilinear filtering from sampling the neighbouring tile.
-	var u0 := (float(t) + 0.002) / float(TILES)
-	var u1 := (float(t + 1) - 0.002) / float(TILES)
-	var v1 := height / PANEL_H
+		width: float, height: float, _tile: int = 0,
+		color: Color = Color.WHITE) -> void:
+	var u1 := maxf(0.35, width / PANEL_W)
+	var v1 := clampf(height / PANEL_H, 0.35, 0.98)
 	var b := origin + right * width
 	var c := origin + right * width + Vector3.UP * height
 	var d := origin + Vector3.UP * height
-	add_uv_quad(st, origin, b, c, d, Vector2(u0, 0.0), Vector2(u1, 0.0),
-			Vector2(u1, v1), Vector2(u0, v1), color)
+	# 2 texel inset keeps bilinear filtering off the texture edge.
+	add_uv_quad(st, origin, b, c, d, Vector2(0.002, 0.004), Vector2(u1, 0.004),
+			Vector2(u1, v1), Vector2(0.002, v1), color)
 
 
 ## Flat horizontal quad (roads, water) with world-space UVs in metres / `tile`.
@@ -355,7 +361,7 @@ static func photo_art_enabled() -> bool:
 static func invalidate_photo_cache() -> void:
 	_mat_road_photo = null
 	_mat_walk_photo = null
-	_mat_facade = null
+	_mat_facade = [null, null, null]
 	_mat_water = null
 	_mat_steel = null
 	_mat_concrete_photo = null
@@ -436,16 +442,25 @@ static func pavement_photo_material() -> StandardMaterial3D:
 	return _mat_walk_photo
 
 
-static func facade_material() -> StandardMaterial3D:
+## `variant` picks one of the three photographed Bahri shopfronts. They are
+## separate textures rather than one atlas so each keeps its full resolution and
+## the UVs stay metric (see add_facade_panel).
+static func facade_material(variant: int = 0) -> StandardMaterial3D:
 	if not photo_art_enabled():
 		return facade_flat_material()
-	if _mat_facade == null:
-		var m := _photo_mat("res://assets/textures/facade_atlas.jpg",
-				Vector2(1.0, 1.0), 0.9)
-		m.normal_enabled = false
-		m.cull_mode = BaseMaterial3D.CULL_DISABLED
-		_mat_facade = m
-	return _mat_facade
+	var index := clampi(variant, 0, 2)
+	if _mat_facade[index] != null:
+		return _mat_facade[index]
+	const PATHS := [
+		"res://assets/textures/facade_shops.jpg",
+		"res://assets/textures/facade_ochre.jpg",
+		"res://assets/textures/facade_plaster.jpg",
+	]
+	var m := _photo_mat(PATHS[index], Vector2(1.0, 1.0), 0.9)
+	m.normal_enabled = false
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_mat_facade[index] = m
+	return _mat_facade[index]
 
 
 static func water_photo_material() -> StandardMaterial3D:

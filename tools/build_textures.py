@@ -24,6 +24,7 @@ is *not* shipped with the game.
 from __future__ import annotations
 
 import math
+from PIL import ImageDraw
 import os
 import sys
 
@@ -228,6 +229,218 @@ def equirect_sky(img: Image.Image) -> Image.Image:
     return out
 
 
+def erase_sun(img: Image.Image) -> Image.Image:
+    """Remove the sun disc from the source photo.
+
+    The dome is built by crossfading the photo with itself rolled half a turn,
+    so any bright unique feature is printed twice - a second sun on the opposite
+    horizon. Copy-pasting a neighbouring patch left visible streaks (the haze
+    has a horizontal gradient), so the disc is instead replaced by a heavily
+    blurred copy of its own surroundings, which is exactly what a flat dust
+    horizon looks like.
+    """
+    img = img.convert("RGB")
+    sw, sh = img.size
+    px = img.load()
+    # The sun is the brightest thing in the lower half of the frame.
+    best_x, best_y, best_score = sw // 2, int(sh * 0.8), 0.0
+    for y in range(int(sh * 0.55), int(sh * 0.98), 2):
+        for x in range(0, sw, 2):
+            r, g, b = px[x, y]
+            score = r + g + b
+            if score > best_score:
+                best_x, best_y, best_score = x, y, score
+
+    rx = int(sh * 0.16)
+    ry = int(sh * 0.085)
+    # Blur radius must exceed the glow, otherwise the halo survives.
+    blurred = img.filter(ImageFilter.GaussianBlur(rx * 0.55))
+    mask = Image.new("L", (sw, sh), 0)
+    ImageDraw.Draw(mask).ellipse(
+        (best_x - rx, best_y - ry, best_x + rx, best_y + ry), fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(min(rx, ry) * 0.45))
+    return Image.composite(blurred, img, mask)
+
+
+def flatten_azimuth(band: Image.Image) -> Image.Image:
+    """Remove the photo's left-to-right brightness ramp from a sky band.
+
+    A sunset photo is much brighter on the sun side. Mirroring such a band turns
+    that ramp into two fake "sun glows" 180 deg apart, and the seam ends up as
+    the brightest column on the whole dome. Removing only the low-frequency
+    column profile leaves every cloud intact while making the sky uniform in
+    azimuth, so the single painted sun below is the only bright feature.
+    """
+    band = band.convert("RGB")
+    w, h = band.size
+    px = band.load()
+    # Smoothed per-column brightness over the sky part only (the haze below the
+    # horizon is already flat and would only add noise).
+    rows = range(0, max(2, int(h * 0.62)))
+    prof = []
+    for x in range(w):
+        prof.append(sum(sum(px[x, y]) for y in rows) / max(1, len(rows)))
+    k = max(8, w // 24)
+    smooth = []
+    for x in range(w):
+        acc = 0.0
+        for d in range(-k, k + 1):
+            # Clamp, never wrap: the band is *not* periodic at this stage, and a
+            # circular average would fold the bright left edge onto the dark
+            # right edge and print a hard stripe down the middle of the sky.
+            acc += prof[min(w - 1, max(0, x + d))]
+        smooth.append(acc / (2 * k + 1))
+    mean = sum(smooth) / w
+    if mean <= 1.0:
+        return band
+    out = Image.new("RGB", (w, h))
+    op = out.load()
+    for x in range(w):
+        gain = mean / max(1.0, smooth[x])
+        for y in range(h):
+            r, g, b = px[x, y]
+            op[x, y] = (min(255, int(r * gain)), min(255, int(g * gain)),
+                        min(255, int(b * gain)))
+    return out
+
+
+def paint_sun(dome: Image.Image, u: float = 0.035, v: float = 0.465) -> Image.Image:
+    """Paint one soft sun + glow at (u, v) of the equirect dome.
+
+    Computed per pixel instead of by stacking ellipses: stacked shapes band
+    visibly on a smooth horizon and read as a square blob. The falloff is
+    exponential (like real scattering) with a small bright core.
+
+    `u = 0` is the direction the chase camera looks at (Godot's panorama sky maps
+    -Z to u = 0), so a small positive u puts the sun just right of the runner,
+    low over the horizon: the Khartoum dusk the whole art direction is built on.
+    """
+    w, h = dome.size
+    cx = int(w * u) % w
+    cy = int(h * v)
+
+    reach = int(h * 0.40)
+    x0, x1 = max(0, cx - reach), min(w, cx + reach)
+    y0, y1 = max(0, cy - reach), min(h, cy + reach)
+    patch = dome.crop((x0, y0, x1, y1)).convert("RGB")
+    pp = patch.load()
+    pw, ph = patch.size
+    lx, ly = cx - x0, cy - y0
+
+    core = max(2.0, h * 0.011)          # radius of the bright disc
+    halo = h * 0.075                    # radius of the tight glow
+    for y in range(ph):
+        for x in range(pw):
+            dx = float(x - lx)
+            dy = float(y - ly) * 1.35   # squash: the haze is wider than tall
+            d = math.hypot(dx, dy)
+            if d > reach:
+                continue
+            # Tight halo + a very wide, very faint wash, plus a tiny core.
+            glow = 0.55 * math.exp(-d / halo) + 0.22 * math.exp(-d / (halo * 3.2))
+            disc = math.exp(-(d / core) ** 2)
+            # Cosine window -> exactly 0 at the patch edge, otherwise the crop
+            # leaves a visible circle on the haze.
+            glow *= 0.5 + 0.5 * math.cos(math.pi * min(1.0, d / reach))
+            glow = min(1.6, glow + 1.1 * disc)
+            r, g, b = pp[x, y]
+            # Warm the light instead of whitening everything: 1.0 / 0.78 / 0.52.
+            nr = r + (255 - r) * min(1.0, glow)
+            ng = g + (232 - g) * min(1.0, glow * 0.82)
+            nb = b + (176 - b) * min(1.0, glow * 0.62)
+            pp[x, y] = (int(nr), int(ng), int(nb))
+
+    out = dome.copy()
+    out.paste(patch, (x0, y0))
+    return out
+
+
+def equirect_panorama(img: Image.Image) -> Image.Image:
+    """Turn a sky-only photo into a 2:1 equirectangular dome texture.
+
+    Three problems have to be solved, and each one has exactly one clean answer:
+
+    1. **The photo does not wrap.** A 360 deg dome needs the left edge to match
+       the right. Mirroring is seamless but doubles the cloud symmetry into a
+       visible hard line down the middle of the sky, so we crossfade the band
+       with itself rolled by half a turn and a cosine mask instead.
+    2. **The sun is unique.** Any wrap or crossfade prints it twice. The band we
+       use (from 55 % of the frame rightwards) contains no sun at all; the sun
+       in the game is painted once, in paint_sun(), at the azimuth the camera
+       looks at.
+    3. **The photo has a left-to-right brightness ramp.** Crossfading a ramp
+       leaves two bright patches 180 deg apart - fake suns made of pure ramp.
+       flatten_azimuth() removes only that low-frequency ramp and leaves every
+       cloud untouched.
+    """
+    w, h = SKY_W, SKY_H
+    upper = h // 2
+
+    src = img.convert("RGB")
+    sw, sh = src.size
+    band = src.crop((int(sw * 0.55), 0, sw, int(sh * 0.97)))
+    band = flatten_azimuth(band)
+
+    # Seamless wrap: crossfade with the same band rolled half a turn. The mask
+    # is 1 across the middle and cosine-ramps to 0 over `overlap` at both edges;
+    # because the roll is exactly half the width, the two ramps cover the same
+    # cloud field and the loop closes with no step at u = 0 or u = 0.5.
+    bw, bh = band.size
+    shifted = ImageChops.offset(band, bw // 2, 0)
+    mask = Image.new("L", (bw, bh), 0)
+    mp = mask.load()
+    overlap = max(4, int(bw * 0.28))
+    for x in range(bw):
+        if x < overlap:
+            t = x / max(1, overlap - 1)
+            a = 0.5 - 0.5 * math.cos(math.pi * t)
+        elif x > bw - 1 - overlap:
+            t = (bw - 1 - x) / max(1, overlap - 1)
+            a = 0.5 - 0.5 * math.cos(math.pi * t)
+        else:
+            a = 1.0
+        v = int(255 * a)
+        for y in range(bh):
+            mp[x, y] = v
+    wrapped = Image.composite(band, shifted, mask)
+    out = wrapped.resize((w, upper), Image.LANCZOS)
+
+    # Deepen the zenith: the top ~15 % of an equirect dome is the pole, which a
+    # single-row photo does not actually contain.
+    ramp = Image.new("RGB", (w, upper))
+    rp = ramp.load()
+    for y in range(upper):
+        t = y / max(1, upper - 1)
+        k = 1.0 - 0.30 * (1.0 - t) ** 2.0
+        v = int(255 * k)
+        for x in range(w):
+            rp[x, y] = (v, int(v * 0.98), int(255 * min(1.0, k * 1.02)))
+    out.paste(ImageChops.multiply(out, ramp), (0, 0))
+
+    # Lower hemisphere: horizon haze fading into ground. Fog and the street hide
+    # almost all of it, so a two-colour ramp is enough and costs nothing.
+    # Continue from the last sky row *per column*, so the hemisphere boundary is
+    # invisible: averaging a band would leave a step wherever the haze differs
+    # between the top and the bottom of that band.
+    ground = (46, 40, 36)
+    edge = out.crop((0, upper - 1, w, upper)).load()
+    lower = Image.new("RGB", (w, upper))
+    lp = lower.load()
+    for y in range(upper):
+        t = y / max(1, upper - 1)
+        k = (t / 0.30) ** 1.4 if t < 0.30 else 1.0
+        k = min(1.0, k)
+        for x in range(w):
+            e = edge[x, 0]
+            lp[x, y] = (int(e[0] * (1 - k) + ground[0] * k),
+                        int(e[1] * (1 - k) + ground[1] * k),
+                        int(e[2] * (1 - k) + ground[2] * k))
+    dome = Image.new("RGB", (w, h))
+    dome.paste(out, (0, 0))
+    dome.paste(lower, (0, upper))
+    return paint_sun(dome)
+
+
 def build_skyline(img: Image.Image) -> Image.Image:
     """Extract the Khartoum skyline as an alpha band for a cylindrical backdrop.
 
@@ -287,8 +500,13 @@ def facade_strip(img: Image.Image, size: tuple[int, int],
 # ---------------------------------------------------------------------------
 def build_sky() -> None:
     print("sky")
+    # The sky dome comes from the dedicated, sky-only panorama. The old source
+    # (`khartoum_skyline.jpg`) is a cityscape: cropping its top 20 % yields a
+    # flat, low-contrast band that washes out behind the fog, which is why the
+    # gameplay shots looked hazy rather than like a sunset.
+    save(equirect_panorama(load("sky_panorama.jpg")), "sky_khartoum.jpg", quality=90)
+    # The skyline band still comes from the real Khartoum photo.
     photo = load("khartoum_skyline.jpg")
-    save(equirect_sky(photo), "sky_khartoum.jpg", quality=88)
     save(build_skyline(photo), "skyline_khartoum.png")
     # A dedicated menu backdrop: the photo itself, slightly darkened for text.
     menu = cover_crop(photo, (1280, 720), (0.5, 0.42))

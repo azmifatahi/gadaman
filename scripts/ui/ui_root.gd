@@ -337,19 +337,16 @@ func _build_touch_buttons() -> void:
 	# makes the container exactly as big as its two 96 px pads, so the pads sit in
 	# thumb reach without covering the runner.
 	var left_group := HBoxContainer.new()
+	left_group.name = "LeftPads"
 	left_group.add_theme_constant_override("separation", 14)
 	left_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_buttons.add_child(left_group)
-	left_group.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT,
-			Control.PRESET_MODE_MINSIZE, 26)
 
 	var right_group := HBoxContainer.new()
+	right_group.name = "RightPads"
 	right_group.add_theme_constant_override("separation", 14)
-	right_group.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	right_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_buttons.add_child(right_group)
-	right_group.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT,
-			Control.PRESET_MODE_MINSIZE, 26)
 
 	_btn_jump = _pad("JUMP", "JumpButton")
 	_btn_jump.size_flags_horizontal = Control.SIZE_SHRINK_END
@@ -368,6 +365,14 @@ func _build_touch_buttons() -> void:
 	_btn_right = _pad(">", "PadButton")
 	_btn_right.pressed.connect(_on_right_pressed)
 	left_group.add_child(_btn_right)
+
+	# Anchoring has to happen AFTER the pads are children: PRESET_MODE_MINSIZE
+	# computes the offsets from the container's minimum size, which is 0 while it
+	# is still empty. Doing it early left the pads hanging off the bottom edge.
+	left_group.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT,
+			Control.PRESET_MODE_MINSIZE, 26)
+	right_group.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT,
+			Control.PRESET_MODE_MINSIZE, 26)
 
 	_refresh_button_visibility()
 

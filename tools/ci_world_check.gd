@@ -20,7 +20,7 @@ const EXPECTED := {
 	0: ["road", "walk", "art", "ground", "facade"],
 	1: ["road", "walk", "art", "ground", "facade"],
 	2: ["road", "walk", "art", "ground", "facade", "water", "concrete"],
-	3: ["road", "walk", "art", "ground", "facade"],
+	3: ["road", "walk", "art", "ground", "facade_c"],
 	4: ["road", "walk", "art", "ground", "water", "steel", "concrete"],
 	5: ["road", "walk", "art", "ground", "water", "concrete"],
 	6: ["road", "walk", "art", "ground", "facade"],
@@ -102,7 +102,8 @@ func _check_segments() -> void:
 				tris += verts.size() / 3
 				# A surface with a texture needs UVs, or the photo collapses to
 				# one pixel.
-				if String(names[i]) in ["road", "walk", "facade", "water", "steel", "concrete"]:
+				if String(names[i]) in ["road", "walk", "facade", "facade_b", "facade_c",
+						"water", "steel", "concrete"]:
 					if arrays.size() <= Mesh.ARRAY_TEX_UV or (arrays[Mesh.ARRAY_TEX_UV] as PackedVector2Array).is_empty():
 						_problems.append("variant %d surface '%s' has no UVs" % [variant, names[i]])
 			if tris < 200:

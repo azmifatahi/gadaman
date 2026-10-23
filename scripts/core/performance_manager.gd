@@ -180,7 +180,7 @@ func apply_preset(preset: int) -> void:
 		Tier.LOW:
 			shadows_enabled = false
 			shadow_distance = 0.0
-			fog_density = 0.020
+			fog_density = 0.011
 			fog_depth_begin = 24.0
 			fog_depth_end = 118.0
 			fog_color = Color(0.83, 0.62, 0.47)
@@ -195,7 +195,7 @@ func apply_preset(preset: int) -> void:
 		Tier.MEDIUM:
 			shadows_enabled = true
 			shadow_distance = 32.0
-			fog_density = 0.012
+			fog_density = 0.0070
 			fog_depth_begin = 50.0
 			fog_depth_end = 195.0
 			fog_color = Color(0.80, 0.61, 0.49)
@@ -210,7 +210,7 @@ func apply_preset(preset: int) -> void:
 		Tier.HIGH:
 			shadows_enabled = true
 			shadow_distance = 70.0
-			fog_density = 0.0075
+			fog_density = 0.0042
 			fog_depth_begin = 85.0
 			fog_depth_end = 250.0
 			fog_color = Color(0.76, 0.60, 0.51)
@@ -288,7 +288,10 @@ func apply_to_environment(env: Environment) -> void:
 	env.fog_light_energy = 1.0
 	env.fog_density = fog_density
 	# Full sky affect fuses the skyline into the same haze: no horizon seam.
-	env.fog_sky_affect = 0.85
+	# 0.85 painted the photographic sky with dust, which is what made every
+	# gameplay shot look like a beige fog bank. A little sky fog still glues the
+	# skyline band to the dome.
+	env.fog_sky_affect = 0.35
 	env.fog_aerial_perspective = 0.0 if tier == Tier.LOW else 0.4
 	# The Compatibility renderer has no glow / SSAO passes: bloom is faked by the
 	# emissive materials (cups, lamps) instead, which is free on mobile.

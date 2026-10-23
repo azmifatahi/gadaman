@@ -65,8 +65,8 @@ static var _cache: Dictionary = {}
 ## Surface order used by every segment mesh. TrackSegment maps these names to
 ## materials; adding a surface here is all it takes to give the street a new
 ## photographic material.
-const SURFACES := ["road", "walk", "art", "ground", "facade", "water",
-	"steel", "concrete"]
+const SURFACES := ["road", "walk", "art", "ground", "facade", "facade_b",
+	"facade_c", "water", "steel", "concrete"]
 
 
 ## Returns an ArrayMesh whose surfaces follow `SURFACES` (empty surfaces are
@@ -85,6 +85,8 @@ static func build(variant: int, slot: int, density: float) -> ArrayMesh:
 		"art": MeshKit.begin(),
 		"ground": MeshKit.begin(),
 		"facade": MeshKit.begin(),
+		"facade_b": MeshKit.begin(),
+		"facade_c": MeshKit.begin(),
 		"water": MeshKit.begin(),
 		"steel": MeshKit.begin(),
 		"concrete": MeshKit.begin(),
@@ -130,6 +132,18 @@ static func build(variant: int, slot: int, density: float) -> ArrayMesh:
 
 static func clear_cache() -> void:
 	_cache.clear()
+
+
+## Pick one of the three photographed shopfronts, so a street is not wallpapered
+## with the same building 40 times in a row.
+static func _facade_tool(tools: Dictionary, pick: int) -> SurfaceTool:
+	match posmod(pick, 3):
+		1:
+			return tools["facade_b"]
+		2:
+			return tools["facade_c"]
+		_:
+			return tools["facade"]
 
 
 # ---------------------------------------------------------------------------
@@ -223,14 +237,13 @@ static func _build_walkways(st: SurfaceTool, curb_st: SurfaceTool) -> void:
 # ---------------------------------------------------------------------------
 static func _build_street(tools: Dictionary, rng: RandomNumberGenerator, density: float) -> void:
 	var st: SurfaceTool = tools["art"]
-	var facade: SurfaceTool = tools["facade"]
 	for side: float in [-1.0, 1.0]:
 		var z := -LENGTH * 0.5
 		while z < LENGTH * 0.5 - 3.0:
 			var span := rng.randf_range(7.0, 12.0)
 			var skip := density < 0.75 and rng.randf() < 0.35
 			if not skip:
-				_building_into(st, facade, rng, side, z + span * 0.5, span,
+				_building_into(st, tools, rng, side, z + span * 0.5, span,
 						rng.randi_range(0, 2), 1.0)
 			z += span + rng.randf_range(0.5, 2.5)
 		# Street furniture along the curb.
@@ -247,11 +260,11 @@ static func _build_street(tools: Dictionary, rng: RandomNumberGenerator, density
 
 static func _building(st: SurfaceTool, rng: RandomNumberGenerator, side: float,
 		z_center: float, z_span: float) -> void:
-	_building_into(st, null, rng, side, z_center, z_span, 0, 0.0)
+	_building_into(st, {}, rng, side, z_center, z_span, 0, 0.0)
 
 
-## Textured building. `facade` may be null (pure vertex-colour body).
-static func _building_into(st: SurfaceTool, facade: SurfaceTool,
+## Textured building. `tools` may be empty (pure vertex-colour body).
+static func _building_into(st: SurfaceTool, tools: Dictionary,
 		rng: RandomNumberGenerator, side: float, z_center: float, z_span: float,
 		facade_tile: int, texture_scale: float) -> void:
 	var depth := rng.randf_range(5.0, 9.0)
@@ -274,6 +287,7 @@ static func _building_into(st: SurfaceTool, facade: SurfaceTool,
 	# Facade: a photographic panel when the caller supplied a facade surface,
 	# otherwise the old flat window grid (low tier without photo textures).
 	var face_x: float = x_inner + side * 0.03
+	var facade: SurfaceTool = _facade_tool(tools, facade_tile) if not tools.is_empty() else null
 	if facade != null:
 		# One photographic panel per building, mapped exactly once across the
 		# span. Culling is disabled on the facade material, so the same winding
@@ -353,15 +367,17 @@ static func _parked_car(st: SurfaceTool, side: float, z: float,
 # ---------------------------------------------------------------------------
 static func _build_market(tools: Dictionary, rng: RandomNumberGenerator, density: float) -> void:
 	var st: SurfaceTool = tools["art"]
-	var facade: SurfaceTool = tools["facade"]
 	for side: float in [-1.0, 1.0]:
+		var facade: SurfaceTool = _facade_tool(tools, rng.randi_range(0, 2))
 		# A low back wall so stalls read against something solid, with a
 		# photographic shopfront strip above it.
 		MeshKit.add_box(st, Vector3(side * (INNER + 3.2), 2.2, 0),
 				Vector3(6.0, 4.4, LENGTH), PALETTE["wall_b"].darkened(0.05))
+		# The photographic shopfronts cover the road-facing side of that wall. A
+		# floating strip above the wall (the old layout) read as a billboard.
 		MeshKit.add_facade_panel(facade,
-				Vector3(side * (INNER + 0.18), 4.5, -LENGTH * 0.5),
-				Vector3(0, 0, 1), LENGTH, 3.4, 0)
+				Vector3(side * (INNER + 0.17), 0.16, -LENGTH * 0.5),
+				Vector3(0, 0, 1), LENGTH, 4.1)
 		var z := -LENGTH * 0.5 + 3.0
 		while z < LENGTH * 0.5 - 3.0:
 			if rng.randf() < density:
@@ -415,11 +431,10 @@ static func _stall(st: SurfaceTool, side: float, z: float,
 static func _build_corniche(tools: Dictionary, rng: RandomNumberGenerator,
 		density: float) -> void:
 	var st: SurfaceTool = tools["art"]
-	var facade: SurfaceTool = tools["facade"]
 	# River to the left, city to the right.
 	_water(tools["water"], tools["concrete"], -1.0)
 	for side: float in [1.0]:
-		_wall_row(st, facade, side, rng, density)
+		_wall_row(st, tools, side, rng, density)
 	# Corniche railing + palms on the river side.
 	var z := -LENGTH * 0.5 + 2.0
 	while z < LENGTH * 0.5:
@@ -438,13 +453,13 @@ static func _build_corniche(tools: Dictionary, rng: RandomNumberGenerator,
 				Color("#8d949b"))
 
 
-static func _wall_row(st: SurfaceTool, facade: SurfaceTool, side: float,
+static func _wall_row(st: SurfaceTool, tools: Dictionary, side: float,
 		rng: RandomNumberGenerator, density: float) -> void:
 	var z := -LENGTH * 0.5
 	while z < LENGTH * 0.5 - 4.0:
 		var span := rng.randf_range(9.0, 14.0)
 		if rng.randf() < 0.85 * maxf(density, 0.6):
-			_building_into(st, facade, rng, side, z + span * 0.5, span,
+			_building_into(st, tools, rng, side, z + span * 0.5, span,
 					rng.randi_range(0, 2), 1.0)
 		z += span + rng.randf_range(2.0, 4.0)
 
@@ -497,12 +512,11 @@ static func _palm(st: SurfaceTool, base: Vector3, rng: RandomNumberGenerator) ->
 static func _build_neighbourhood(tools: Dictionary, rng: RandomNumberGenerator,
 		density: float) -> void:
 	var st: SurfaceTool = tools["art"]
-	var facade: SurfaceTool = tools["facade"]
 	for side: float in [-1.0, 1.0]:
 		var z := -LENGTH * 0.5
 		while z < LENGTH * 0.5 - 6.0:
 			var span := rng.randf_range(8.0, 13.0)
-			_compound_wall(st, facade, side, z + span * 0.5, span, rng)
+			_compound_wall(st, tools, side, z + span * 0.5, span, rng)
 			z += span + rng.randf_range(1.5, 4.0)
 		for i in 3:
 			var fz := -LENGTH * 0.5 + 5.0 + float(i) * 12.0 + rng.randf_range(-2.0, 2.0)
@@ -521,7 +535,7 @@ static func _build_neighbourhood(tools: Dictionary, rng: RandomNumberGenerator,
 						Vector3(0.04, 0.8, 0.7), col)
 
 
-static func _compound_wall(st: SurfaceTool, facade: SurfaceTool, side: float,
+static func _compound_wall(st: SurfaceTool, tools: Dictionary, side: float,
 		z_center: float, z_span: float, rng: RandomNumberGenerator) -> void:
 	var x: float = side * (INNER + 0.35)
 	var h := rng.randf_range(2.0, 2.8)
@@ -540,7 +554,7 @@ static func _compound_wall(st: SurfaceTool, facade: SurfaceTool, side: float,
 	MeshKit.add_box(st, Vector3(house_x, house_h * 0.5 + 0.16, z_center),
 			Vector3(6.0, house_h, z_span * 0.8), PALETTE["wall_a"])
 	# Photographic plaster panel on the road-facing wall of the house.
-	MeshKit.add_facade_panel(facade,
+	MeshKit.add_facade_panel(_facade_tool(tools, 2),
 			Vector3(house_x - side * 3.02, 0.16, z_center - z_span * 0.4),
 			Vector3(0, 0, 1), z_span * 0.8, house_h - 0.2, 2)
 	MeshKit.add_box(st, Vector3(house_x, house_h + 0.3, z_center),
@@ -594,18 +608,20 @@ static func _build_mac_nimir(tools: Dictionary, rng: RandomNumberGenerator,
 					Vector2(0, 0), Vector2(4.8 / 6.0, 0), Vector2(4.8 / 6.0, 2.2 / 6.0),
 					Vector2(0, 2.2 / 6.0), Color.WHITE)
 
-	# Overhead banner gantries - the trailer shot, kept sparse.
+	# Overhead banner gantries. They hang ABOVE the truss (7.4 m): at 4.2 m the
+	# banners sat exactly at the chase camera's height and filled the screen with
+	# giant geometry-coloured flags.
 	if density > 0.6:
 		for i in 2:
 			var bz := -h + 10.0 + float(i) * 18.0
 			for side: float in [-1.0, 1.0]:
-				MeshKit.add_box(art, Vector3(side * (INNER - 0.3), 3.4, bz),
-						Vector3(0.16, 6.4, 0.16), PALETTE["metal"])
-			MeshKit.add_box(art, Vector3(0, 6.5, bz), Vector3((INNER - 0.3) * 2.0, 0.09, 0.09),
+				MeshKit.add_box(art, Vector3(side * (INNER - 0.3), 3.9, bz),
+						Vector3(0.14, 7.8, 0.14), PALETTE["metal"])
+			MeshKit.add_box(art, Vector3(0, 7.75, bz), Vector3((INNER - 0.3) * 2.0, 0.08, 0.08),
 					PALETTE["metal"])
-			for k in 3:
-				MeshKit.add_flag_panel(art, Vector3(-2.6 + float(k) * 2.6 - 1.3, 4.2, bz),
-						2.6, 1.7)
+			for k in 4:
+				MeshKit.add_flag_panel(art,
+						Vector3(-2.7 + float(k) * 1.8 - 0.75, 7.55, bz), 1.5, 1.0)
 
 
 ## One side of a riveted steel truss, 6.5 m tall, made of textured box chords.
@@ -687,7 +703,6 @@ static func _build_shambat(tools: Dictionary, rng: RandomNumberGenerator,
 static func _build_bahri(tools: Dictionary, rng: RandomNumberGenerator,
 		density: float) -> void:
 	var art: SurfaceTool = tools["art"]
-	var facade: SurfaceTool = tools["facade"]
 	for side: float in [-1.0, 1.0]:
 		var z := -LENGTH * 0.5
 		while z < LENGTH * 0.5 - 4.0:
@@ -705,8 +720,9 @@ static func _build_bahri(tools: Dictionary, rng: RandomNumberGenerator,
 			MeshKit.add_box(art, Vector3(x_inner + side * 0.35, height + 0.16, z + span * 0.5),
 					Vector3(0.9, 0.42, span + 0.2), tone.darkened(0.25))
 			# Photographic facade on the street side.
-			MeshKit.add_facade_panel(facade, Vector3(x_inner + side * 0.05, 0.16, z),
-					Vector3(0, 0, 1), span, height - 0.2, rng.randi_range(0, 2))
+			MeshKit.add_facade_panel(_facade_tool(tools, rng.randi_range(0, 2)),
+					Vector3(x_inner + side * 0.05, 0.16, z),
+					Vector3(0, 0, 1), span, height - 0.2)
 			# Corrugated awning over the shop.
 			MeshKit.add_box(art, Vector3(x_inner - side * 0.85, 3.0, z + span * 0.5),
 					Vector3(1.8, 0.08, span * 0.9), PALETTE["metal"].darkened(0.2))

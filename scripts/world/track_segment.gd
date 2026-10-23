@@ -17,6 +17,8 @@ const MATERIALS := {
 	"road": "asphalt_photo_material",
 	"walk": "pavement_photo_material",
 	"facade": "facade_material",
+	"facade_b": "facade_material",
+	"facade_c": "facade_material",
 	"water": "water_photo_material",
 	"steel": "steel_truss_material",
 	"concrete": "concrete_photo_material",
@@ -72,7 +74,11 @@ func _material_for(surface_name: String) -> Material:
 		"walk":
 			return MeshKit.pavement_photo_material()
 		"facade":
-			return MeshKit.facade_material()
+			return MeshKit.facade_material(0)
+		"facade_b":
+			return MeshKit.facade_material(1)
+		"facade_c":
+			return MeshKit.facade_material(2)
 		"water":
 			return MeshKit.water_photo_material()
 		"steel":
