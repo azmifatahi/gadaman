@@ -1,0 +1,3 @@
+using_imported_hero=false
+model=Model
+model_children=Root

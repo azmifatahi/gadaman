@@ -1,10 +1,6 @@
 Godot Engine v4.4.1.stable.official.49a5bc7b6 - https://godotengine.org
 
-[HeroProbe] hero children: Mesh, AnimationPlayer, AnimationTree
-[HeroProbe] skeleton=Skeleton3D bones=65
-[HeroProbe] AnimationPlayer root_node='..' clips=["fall", "idle", "jog", "jump", "land", "slide", "sprint", "stumble"]
-[HeroProbe] AnimationTree active=true anim_player='../AnimationPlayer' tree_root=<null>
-[HeroProbe] AnimationTree unusable -> driving AnimationPlayer directly (jog)
-[HeroProbe] frame 10 pose captured (current_node='-' clip='jog')
-[HeroProbe] frame 45 pose compare: 0/65 bones moved (current_node='-' clip='jog')
-[HeroProbe] FAILED: skeleton is frozen (T-pose) — AnimationTree is not driving it.
+[HeroProbe] Godot 4.4.1-stable (official)
+[HeroProbe] RAW import: clips=["Take 001", "mixamo_com"] bones=65 root_node='..'
+[HeroProbe] RAW import: clip='mixamo_com' len=0.583 tracks=53 playing=true moved=51/65 bones
+[HeroProbe] FAILED: res://assets/models/hero/hero.tscn not found
