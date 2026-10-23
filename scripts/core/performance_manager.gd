@@ -40,7 +40,9 @@ var shadow_distance: float = 40.0
 var fog_density: float = 0.010
 var fog_depth_begin: float = 45.0
 var fog_depth_end: float = 190.0
-var fog_color: Color = Color(0.62, 0.55, 0.58)
+## Matches the horizon haze of the Khartoum sunset photo; a purple-grey fog on a
+## warm photographic sky reads as dirt on the lens.
+var fog_color: Color = Color(0.66, 0.55, 0.47)
 var prop_density: float = 1.0
 var particle_amount: float = 1.0
 var draw_distance: float = 230.0
@@ -178,7 +180,7 @@ func apply_preset(preset: int) -> void:
 		Tier.LOW:
 			shadows_enabled = false
 			shadow_distance = 0.0
-			fog_density = 0.020
+			fog_density = 0.011
 			fog_depth_begin = 24.0
 			fog_depth_end = 118.0
 			fog_color = Color(0.83, 0.62, 0.47)
@@ -193,7 +195,7 @@ func apply_preset(preset: int) -> void:
 		Tier.MEDIUM:
 			shadows_enabled = true
 			shadow_distance = 32.0
-			fog_density = 0.012
+			fog_density = 0.0070
 			fog_depth_begin = 50.0
 			fog_depth_end = 195.0
 			fog_color = Color(0.80, 0.61, 0.49)
@@ -208,7 +210,7 @@ func apply_preset(preset: int) -> void:
 		Tier.HIGH:
 			shadows_enabled = true
 			shadow_distance = 70.0
-			fog_density = 0.0075
+			fog_density = 0.0042
 			fog_depth_begin = 85.0
 			fog_depth_end = 250.0
 			fog_color = Color(0.76, 0.60, 0.51)
@@ -286,16 +288,23 @@ func apply_to_environment(env: Environment) -> void:
 	env.fog_light_energy = 1.0
 	env.fog_density = fog_density
 	# Full sky affect fuses the skyline into the same haze: no horizon seam.
-	env.fog_sky_affect = 0.85
+	# 0.85 painted the photographic sky with dust, which is what made every
+	# gameplay shot look like a beige fog bank. A little sky fog still glues the
+	# skyline band to the dome.
+	env.fog_sky_affect = 0.35
 	env.fog_aerial_perspective = 0.0 if tier == Tier.LOW else 0.4
 	# The Compatibility renderer has no glow / SSAO passes: bloom is faked by the
 	# emissive materials (cups, lamps) instead, which is free on mobile.
 	env.glow_enabled = post_effects_enabled
 	env.glow_intensity = 0.55 if post_effects_enabled else 0.0
 	env.ssao_enabled = post_effects_enabled
-	env.adjustment_enabled = tier == Tier.HIGH
-	env.adjustment_saturation = 1.06
-	env.adjustment_contrast = 1.02
+	# A mild grade on every tier above LOW. The art is photographic now, so the
+	# job of this pass is to *remove* the remaining cartoon saturation and add
+	# back a little film contrast, not to punch the colours up.
+	env.adjustment_enabled = tier != Tier.LOW
+	env.adjustment_saturation = 0.92
+	env.adjustment_contrast = 1.06
+	env.adjustment_brightness = 1.0
 
 
 func apply_to_sun(light: DirectionalLight3D, _camera: Camera3D = null) -> void:

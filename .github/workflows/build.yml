@@ -59,6 +59,20 @@ jobs:
           godot --headless --import 2>&1 | tail -n 40
           godot --headless --import 2>&1 | tail -n 10
 
+      - name: Compile every script (GDScript 2 type checks)
+        run: |
+          # gdparse is syntax-only. This loads each script so the real compiler
+          # catches base-typed property reads, uninferable `:=` and the like.
+          set +e
+          timeout 120 godot --headless --script tools/ci_script_check.gd 2>&1 \
+            | tee scripts.log | tail -n 40
+          set -e
+          if ! grep -q "\[CIScripts\] OK" scripts.log; then
+            grep -aE "CIScripts|Parse Error|SCRIPT ERROR" scripts.log | head -n 25 \
+              | while IFS= read -r line; do echo "::error title=scripts::${line}"; done
+            exit 1
+          fi
+
       - name: Verify FBX files were imported
         run: |
           ls -la res://.godot/imported/ 2>/dev/null | grep -i "run forward\|jump\|slide\|stumble\|falling" | head -10 || true
@@ -90,6 +104,47 @@ jobs:
             exit 1
           }
 
+      - name: Headless gameplay smoke test
+        run: |
+          set -o pipefail
+          timeout 180 godot --headless --quit-after 1200 -- --smoke 2>&1 | tee smoke.log || true
+          echo "--- errors ---"
+          # Surface offending lines as check annotations: build artifacts cannot
+          # be downloaded from every environment, annotations can.
+          set +e
+          python3 tools/ci_report_errors.py smoke.log
+          report=$?
+          set -e
+          if [ "$report" -ne 0 ]; then
+            tail -n 15 smoke.log | sed 's/^/::error::/'
+            exit 1
+          fi
+          if ! grep -q "SMOKE_OK" smoke.log; then
+            echo "::error::Smoke test did not finish (no SMOKE_OK marker)."
+            tail -n 12 smoke.log | sed 's/^/::error::/'
+            exit 1
+          fi
+          echo "Smoke test passed."
+
+      - name: Verify streets + settings (strict)
+        run: |
+          # The procedural world cannot be reviewed from a diff: this builds all
+          # 7 districts, checks each photographic surface has UVs and that the
+          # lane-control/district settings round-trip.
+          set +e
+          timeout 180 godot --headless --script tools/ci_world_check.gd 2>&1 \
+            | tee world_check.log | tail -n 40
+          status=${PIPESTATUS[0]}
+          set -e
+          if ! grep -q "\[CIWorld\] OK" world_check.log; then
+            # Logs live in blob storage that some environments cannot reach, so
+            # every diagnostic line is re-emitted as a check annotation.
+            grep -aE "\[CIWorld\]|SCRIPT ERROR|Parse Error|ERROR:" world_check.log \
+              | head -n 30 | while IFS= read -r line; do echo "::error title=world_check::${line}"; done
+            echo "::error::procedural streets failed validation (godot exit ${status})"
+            exit 1
+          fi
+
       - name: Probe hero animation (strict)
         run: |
           # Data checks are not enough: this instantiates the scene in a real
@@ -120,34 +175,16 @@ jobs:
               | while IFS= read -r line; do echo "::notice::${line}"; done
           fi
 
-      - name: Headless gameplay smoke test
-        run: |
-          set -o pipefail
-          timeout 180 godot --headless --quit-after 1200 -- --smoke 2>&1 | tee smoke.log || true
-          echo "--- errors ---"
-          # Surface offending lines as check annotations: build artifacts cannot
-          # be downloaded from every environment, annotations can.
-          set +e
-          python3 tools/ci_report_errors.py smoke.log
-          report=$?
-          set -e
-          if [ "$report" -ne 0 ]; then
-            tail -n 15 smoke.log | sed 's/^/::error::/'
-            exit 1
-          fi
-          if ! grep -q "SMOKE_OK" smoke.log; then
-            echo "::error::Smoke test did not finish (no SMOKE_OK marker)."
-            tail -n 12 smoke.log | sed 's/^/::error::/'
-            exit 1
-          fi
-          echo "Smoke test passed."
-
       - name: Upload smoke log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: smoke-log
-          path: smoke.log
+          path: |
+            smoke.log
+            world_check.log
+            hero_verify.log
+            hero_probe.log
           if-no-files-found: ignore
 
       - name: Upload built hero + .godot cache for APK job
@@ -450,7 +487,15 @@ jobs:
           set -o pipefail
           timeout 240 xvfb-run -a -s "-screen 0 1280x720x24" \
             godot --rendering-driver opengl3 --resolution 1280x720 -- --screenshot 2>&1 | tee shots.log || true
-          grep -E "SHOT|SCREENSHOTS_DONE|ERROR" shots.log | tail -n 20 || true
+          # Annotations instead of plain log lines: the raw logs are served from
+          # blob storage that some environments cannot reach.
+          grep -aE "SHOT|SCREENSHOTS_DONE|SCRIPT ERROR|Parse Error|ERROR:" shots.log \
+            | tail -n 25 | while IFS= read -r line; do echo "::notice title=shots::${line}"; done
+          if ! grep -q "SCREENSHOTS_DONE" shots.log; then
+            grep -aE "SCRIPT ERROR|Parse Error|ERROR:|Cannot|Invalid" shots.log | head -n 10 \
+              | while IFS= read -r line; do echo "::error title=shots::${line}"; done
+            echo "::error::screenshot session did not reach SCREENSHOTS_DONE"
+          fi
           mkdir -p docs/screenshots
           USER_DIR="$HOME/.local/share/godot/app_userdata/Sudan Runner"
           ls -la "$USER_DIR" || true

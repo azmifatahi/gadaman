@@ -9,8 +9,9 @@
 ##   * Slide is a timed duck (0.62 s) that lowers the head below the 1.25 m bar
 ##     clearance and can be cancelled into a jump.
 ##
-## Input is deliberately engine-agnostic: swipes, mouse drags, keys and the
-## optional accelerometer all funnel into the same three verbs.
+## Input is deliberately engine-agnostic: swipes, on-screen buttons, mouse
+## drags, keyboard and the gyroscope all funnel into the same verbs, and the
+## player chooses which ones are active in Settings (see Settings.LaneControl).
 ##
 ## This controller supports two visual back-ends:
 ##   1. The imported Mixamo hero (res://assets/models/hero/hero.tscn) — uses an
@@ -42,6 +43,12 @@ const JUMP_VELOCITY := 12.6
 const GRAVITY := 38.0
 const SLIDE_TIME := 0.62
 const SWIPE_THRESHOLD := 46.0     # logical pixels
+## Gyroscope: rad/s of yaw before a lane change is committed. A natural wrist
+## flick peaks around 1.6-2.4 rad/s, so 0.55 catches intent without firing on
+## hand tremor (which stays under 0.2).
+const GYRO_THRESHOLD := 0.55
+const GYRO_COOLDOWN := 0.28
+## Accelerometer fallback for phones without a gyro (rare, but cheap to keep).
 const TILT_THRESHOLD := 0.22
 const TILT_COOLDOWN := 0.32
 
@@ -67,6 +74,11 @@ var _touch_start := Vector2.ZERO
 var _touch_consumed := false
 var _tilt_baseline := 0.0
 var _tilt_cooldown := 0.0
+var _gyro_cooldown := 0.0
+## True when the device reports a live gyroscope (set after the first non-zero
+## sample). Keeps the accelerometer fallback from fighting a working gyro.
+var gyro_available := false
+var _gyro_seen := false
 var _stumble_timer := 0.0
 var _invulnerability_timer := 0.0
 var _last_intensity := -1.0
@@ -418,10 +430,40 @@ func _update_vertical(delta: float) -> void:
 			_do_jump()
 
 
+## Lane control by device motion.
+##
+## The gyroscope is preferred: it measures *rotation rate*, so a lane change is a
+## deliberate wrist flick and the value returns to zero afterwards (no drift, no
+## re-calibration). Phones without a gyro fall back to the accelerometer, where
+## the resting angle has to be calibrated and kept as a baseline.
 func _update_tilt(delta: float) -> void:
 	_tilt_cooldown = maxf(0.0, _tilt_cooldown - delta)
+	_gyro_cooldown = maxf(0.0, _gyro_cooldown - delta)
 	if not Settings.tilt_enabled or not controlling:
 		return
+
+	var gyro := Input.get_gyroscope()
+	if gyro != Vector3.ZERO:
+		_gyro_seen = true
+		gyro_available = true
+	elif _gyro_seen:
+		# The sensor reported values before and now reads exactly zero: the
+		# phone is lying still, which is a valid state, not a missing sensor.
+		gyro_available = true
+
+	if gyro_available:
+		# Y is the axis that rotates the *screen plane*, i.e. tipping the phone
+		# left/right while holding it in portrait. Positive Y tilts the top of
+		# the device to the left on Android, hence the sign flip.
+		var rate := -gyro.y * Settings.gyro_sensitivity
+		if Settings.gyro_invert:
+			rate = -rate
+		if _gyro_cooldown <= 0.0 and absf(rate) > GYRO_THRESHOLD:
+			change_lane(1 if rate > 0.0 else -1)
+			_gyro_cooldown = GYRO_COOLDOWN
+		return
+
+	# Accelerometer fallback.
 	var accel := Input.get_accelerometer()
 	if accel == Vector3.ZERO:
 		return
@@ -431,9 +473,17 @@ func _update_tilt(delta: float) -> void:
 		_tilt_cooldown = TILT_COOLDOWN
 
 
-func _calibrate_tilt() -> void:
+## Re-zeroes the accelerometer baseline (called on start and from Settings when
+## the player enables tilt mid-run).
+func recalibrate_tilt() -> void:
 	var accel := Input.get_accelerometer()
 	_tilt_baseline = accel.x if accel != Vector3.ZERO else 0.0
+	_gyro_cooldown = 0.0
+	_tilt_cooldown = 0.0
+
+
+func _calibrate_tilt() -> void:
+	recalibrate_tilt()
 
 
 # ---------------------------------------------------------------------------
@@ -483,6 +533,29 @@ func slide() -> void:
 		Audio.play_sfx("slide", 0.05, 0.55)
 
 
+## True when drag-to-steer should be listened to.
+##
+## Swiping is the default scheme; choosing buttons or the gyroscope explicitly
+## replaces it, otherwise a thumb resting on a pad (or a moving phone) would
+## fire a lane change as well - the classic double-input bug. In swipe mode the
+## player may still switch the on-screen pads on to use both at once.
+func swipe_enabled() -> bool:
+	return Settings.lane_control == Settings.LaneControl.TOUCH_SWIPE
+
+
+## True when the on-screen button cluster should be visible.
+func buttons_enabled() -> bool:
+	return Settings.show_buttons or Settings.lane_control == Settings.LaneControl.TOUCH_BUTTONS
+
+
+## Hardware sensor report for the Settings screen ("gyro detected") and for the
+## CI screenshot state dump.
+func sensor_debug() -> String:
+	return "gyro_available=%s gyro=%s accel=%s lane_control=%d" % [
+		gyro_available, Input.get_gyroscope(), Input.get_accelerometer(),
+		Settings.lane_control]
+
+
 ## Thin wrapper used by the UI's big touch pad: one entry point for gestures.
 func handle_swipe(direction: String) -> void:
 	match direction:
@@ -502,7 +575,9 @@ func handle_swipe(direction: String) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_controllable():
 		return
-
+	# Gestures are always tracked: the horizontal component is filtered in
+	# _resolve_swipe() so that choosing buttons or the gyroscope never disables
+	# jump/slide, only the lane swipe itself.
 	if event is InputEventScreenTouch:
 		var touch := event as InputEventScreenTouch
 		if touch.pressed:
@@ -526,7 +601,10 @@ func _resolve_swipe(delta: Vector2) -> void:
 	if delta.length() < SWIPE_THRESHOLD:
 		return
 	if absf(delta.x) > absf(delta.y):
-		change_lane(1 if delta.x > 0.0 else -1)
+		# Lane swipes belong to the swipe scheme only; in buttons/gyro mode a
+		# horizontal drag is ignored instead of double-steering.
+		if swipe_enabled():
+			change_lane(1 if delta.x > 0.0 else -1)
 	elif delta.y < 0.0:
 		jump()
 	else:

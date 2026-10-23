@@ -18,6 +18,8 @@ var _suit_probe: ReflectionProbe
 
 
 func _ready() -> void:
+	# _setup_lighting() creates the skyline too (see _apply_sky), so the two paths
+	# cannot add the band twice.
 	_setup_lighting()
 	_setup_suit_reflections()
 	track.set_player(player)
@@ -36,7 +38,9 @@ func _ready() -> void:
 	ui.resume_requested.connect(_on_resume_requested)
 	ui.menu_requested.connect(_on_menu_requested)
 	ui.milestone_passed.connect(_on_milestone)
+	ui.control_pressed.connect(_on_control_pressed)
 	Perf.tier_changed.connect(_on_tier_changed)
+	Settings.changed.connect(_on_setting_changed)
 
 	_to_menu()
 	Audio.play_music()
@@ -58,26 +62,13 @@ func _ready() -> void:
 # ---------------------------------------------------------------------------
 func _setup_lighting() -> void:
 	_environment = Environment.new()
-	var sky := Sky.new()
-	var sky_mat := ProceduralSkyMaterial.new()
-	# Khartoum dusk: indigo zenith, dust-orange horizon.
-	sky_mat.sky_top_color = Color("#141c33")
-	sky_mat.sky_horizon_color = Color("#e0905a")
-	sky_mat.sky_curve = 0.18
-	sky_mat.sky_energy_multiplier = 0.9
-	sky_mat.ground_bottom_color = Color("#191713")
-	sky_mat.ground_horizon_color = Color("#a9704a")
-	sky_mat.ground_curve = 0.06
-	sky_mat.use_debanding = Perf.tier == Perf.Tier.HIGH
-	sky.sky_material = sky_mat
-
-	_environment.background_mode = Environment.BG_SKY
-	_environment.sky = sky
 	_environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	_environment.ambient_light_color = Color("#7d6a72")
-	_environment.ambient_light_energy = 1.35
-	_environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	_environment.tonemap_exposure = 1.0
+	# Photographic Khartoum sunset. `sky_khartoum.jpg` is a real 2:1 equirect
+	# panorama produced by tools/build_textures.py from art_src/, so the clouds
+	# and the light direction match the street photos used for the road and the
+	# facades. It falls back to the old procedural gradient if the texture is
+	# missing (a stripped build, or when the player turns photo art off).
+	_apply_sky(_make_photo_sky())
 	_environment.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	world_environment.environment = _environment
 	Perf.apply_to_environment(_environment)
@@ -97,6 +88,116 @@ func _setup_lighting() -> void:
 	Perf.apply_to_camera(camera_rig)
 
 
+## 2:1 equirectangular panorama photographed on the Blue Nile bank.
+## Swap in the photographic or the painted sky, and keep the ambient light,
+## the tonemapper and the Khartoum skyline in step with it. Used both at boot
+## and when the Settings switch flips, so the two paths can never drift apart.
+## `SkyMaterial` is not exposed to GDScript as a global type, so the concrete
+## panorama material is the parameter type.
+func _apply_sky(photo_sky: PanoramaSkyMaterial) -> void:
+	var has_photo := photo_sky != null
+	var sky := Sky.new()
+	if photo_sky != null:
+		sky.sky_material = photo_sky
+	else:
+		sky.sky_material = _make_procedural_sky()
+	_environment.background_mode = Environment.BG_SKY
+	_environment.sky = sky
+	_environment.ambient_light_color = Color("#9a7f74") if has_photo \
+			else Color("#7d6a72")
+	_environment.ambient_light_energy = 1.15 if has_photo else 1.35
+	# ACES keeps the photographic sky from clipping into a flat orange band.
+	_environment.tonemap_mode = Environment.TONE_MAPPER_ACES if has_photo \
+			else Environment.TONE_MAPPER_FILMIC
+	_environment.tonemap_exposure = 1.05 if has_photo else 1.0
+	# Equirect textures wrap at u = 0, which is exactly the -Z direction the chase
+	# camera looks down: the seam landed dead centre of every frame. Turning the
+	# dome 180 deg puts it behind the player.
+	if has_photo:
+		_environment.sky_rotation = Vector3(0.0, PI, 0.0)
+	else:
+		_environment.sky_rotation = Vector3.ZERO
+	var skyline := get_node_or_null("KhartoumSkyline")
+	if has_photo:
+		if skyline == null:
+			_setup_skyline()
+	elif skyline != null:
+		skyline.queue_free()
+
+
+func _make_photo_sky() -> PanoramaSkyMaterial:
+	if not Settings.photo_graphics:
+		return null
+	const PATH := "res://assets/textures/sky_khartoum.jpg"
+	if not ResourceLoader.exists(PATH):
+		return null
+	var mat := PanoramaSkyMaterial.new()
+	mat.panorama = load(PATH)
+	# A touch of blur removes the pixel-level grain of the source photo at the
+	# zenith, where a 2048 px panorama is stretched the most.
+	mat.filter = true
+	return mat
+
+
+func _make_procedural_sky() -> ProceduralSkyMaterial:
+	var sky_mat := ProceduralSkyMaterial.new()
+	# Khartoum dusk: indigo zenith, dust-orange horizon.
+	sky_mat.sky_top_color = Color("#141c33")
+	sky_mat.sky_horizon_color = Color("#e0905a")
+	sky_mat.sky_curve = 0.18
+	sky_mat.sky_energy_multiplier = 0.9
+	sky_mat.ground_bottom_color = Color("#191713")
+	sky_mat.ground_horizon_color = Color("#a9704a")
+	sky_mat.ground_curve = 0.06
+	sky_mat.use_debanding = Perf.tier == Perf.Tier.HIGH
+	return sky_mat
+
+
+## The Khartoum skyline (Al-Mogran towers, minarets, water towers) on a huge
+## cylinder around the play area.
+##
+## Why a cylinder instead of baking it into the sky dome: an equirect panorama
+## has to tile, so a skyline inside it would repeat once per 180 degrees of turn.
+## On a cylinder the city sits exactly once in the distance, which is how it
+## actually looks from the Blue Nile bridge - and it stays flat, so it never
+## distorts as the camera moves.
+func _setup_skyline() -> void:
+	const PATH := "res://assets/textures/skyline_khartoum.png"
+	if not Settings.photo_graphics or not ResourceLoader.exists(PATH):
+		return
+	if get_node_or_null("KhartoumSkyline") != null:
+		return
+	var tex: Texture2D = load(PATH)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = tex
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	mat.alpha_scissor_threshold = 0.35
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	# Distance haze: the city is 200 m away, so it must melt into the sky.
+	mat.albedo_color = Color(1, 1, 1, 1)
+
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = 150.0
+	mesh.bottom_radius = 150.0
+	mesh.height = 34.0
+	mesh.radial_segments = 48
+	mesh.rings = 1
+	mesh.cap_top = false
+	mesh.cap_bottom = false
+	var mi := MeshInstance3D.new()
+	mi.name = "KhartoumSkyline"
+	mi.mesh = mesh
+	mi.material_override = mat
+	# The band is 34 m tall and the photo is 320 px tall: the cylinder's natural
+	# UV wraps it once around, which is exactly what we want.
+	mi.position = Vector3(0, 14.0, -30.0)
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.extra_cull_margin = 0.0
+	add_child(mi)
+
+
 func _setup_suit_reflections() -> void:
 	if RenderingServer.get_current_rendering_method() == "gl_compatibility":
 		return
@@ -109,6 +210,21 @@ func _setup_suit_reflections() -> void:
 	_suit_probe.box_projection = true
 	_suit_probe.update_mode = ReflectionProbe.UPDATE_ONCE
 	add_child(_suit_probe)
+
+
+## Live reaction to the Settings screen: street choice and the photo-art toggle
+## must not require restarting the run.
+func _on_setting_changed(key: String) -> void:
+	match key:
+		"district":
+			track.set_district(Settings.district)
+		"photo_graphics":
+			# Rebuild the sky, the skyline and every segment's materials.
+			_apply_sky(_make_photo_sky())
+			MeshKit.invalidate_photo_cache()
+			track.refresh_photo_materials()
+		"tilt_enabled", "lane_control":
+			player.recalibrate_tilt()
 
 
 func _on_tier_changed(_tier: int, _info: Dictionary) -> void:
@@ -124,8 +240,14 @@ func _on_tier_changed(_tier: int, _info: Dictionary) -> void:
 # ---------------------------------------------------------------------------
 # Run lifecycle
 # ---------------------------------------------------------------------------
+## On-screen pad press (see UiRoot._build_touch_buttons).
+func _on_control_pressed(direction: String) -> void:
+	player.handle_swipe(direction)
+
+
 func _on_play_requested() -> void:
 	get_tree().paused = false
+	track.set_district(Settings.district)
 	Game.start_run()
 	player.start_running()
 	track.start_run()
@@ -242,6 +364,17 @@ func _run_screenshot_session() -> void:
 	await get_tree().create_timer(2.2).timeout
 	await _save_shot("03_gameplay")
 	_dump_animation_state()
+	# v1.3.0 art pass: show one of the photographic bridges and the on-screen
+	# pad cluster, so the release notes have real captures instead of promises.
+	Settings.set_district(4)
+	await get_tree().create_timer(0.9).timeout
+	await _save_shot("03b_bridge")
+	Settings.set_show_buttons(true)
+	await get_tree().create_timer(0.4).timeout
+	await _save_shot("03c_buttons")
+	Settings.set_show_buttons(false)
+	Settings.set_district(-1)
+	await get_tree().create_timer(0.4).timeout
 	player.jump()
 	await get_tree().create_timer(0.34).timeout
 	await _save_shot("04_jump")

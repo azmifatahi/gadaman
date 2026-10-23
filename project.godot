@@ -11,7 +11,7 @@ config_version=5
 
 config/name="Sudan Runner"
 config/description="3D endless runner through the streets of Khartoum. Collect karkadeh, dodge barriers, go far."
-config/version="1.2.2"
+config/version="1.3.0"
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.4", "GL Compatibility")
 boot_splash/bg_color=Color(0.027451, 0.0392157, 0.0431373, 1)
@@ -57,9 +57,19 @@ folder_colors={
 
 theme/default_font_antialiasing=1
 
+[importer_defaults]
+
+texture={
+"compress/mode": 2,
+"detect_3d/compress_to": 0,
+"mipmaps/generate": true
+}
+
 [input_devices]
 
 pointing/emulate_touch_from_mouse=true
+sensors/enable_accelerometer=true
+sensors/enable_gyroscope=true
 
 [input]
 

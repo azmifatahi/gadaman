@@ -37,4 +37,4 @@ Godot Engine v4.4.1.stable.official.49a5bc7b6 - https://godotengine.org
 [HeroBuilder] slide   length=1.53s tracks=43 moved=42/65 bones
 [HeroBuilder] ✔ wrote res://assets/models/hero/hero.tscn (meshes=2 verts=28374 bones=65 height=1.78m)
 [CIBuildHero] OK -> res://assets/models/hero/hero.tscn
-First run of Sudan Runner 1.2.2
+First run of Sudan Runner 1.3.0

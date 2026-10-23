@@ -18,6 +18,9 @@ signal restart_requested
 signal menu_requested
 signal resume_requested
 signal milestone_passed(meters: int)
+## Emitted by the on-screen pads. World forwards it to the player, which keeps
+## the UI free of a node reference and makes the cluster testable on its own.
+signal control_pressed(direction: String)
 
 const CUP_ICON := "res://assets/art/hud_cup.png"
 
@@ -41,6 +44,12 @@ var _combo_label: Label
 var _pause_button: Button
 var _hud_score_caption: Label
 var _hud_distance_caption: Label
+## Touch button cluster (opt-in alternative to swiping).
+var _buttons: Control
+var _btn_left: Button
+var _btn_right: Button
+var _btn_jump: Button
+var _btn_slide: Button
 
 # Menu
 var _best_caption: Label
@@ -71,8 +80,14 @@ var _settings_title: Label
 var _settings_captions: Dictionary = {}
 var _preset_buttons: Array[Button] = []
 var _fps_buttons: Array[Button] = []
-var _tilt_button: Button
+var _lane_buttons: Array[Button] = []
+var _gyro_slider: HSlider
+var _gyro_value: Label
+var _invert_button: Button
+var _district_buttons: Array[Button] = []
+var _photo_button: Button
 var _haptics_button: Button
+var _buttons_button: Button
 var _language_button: Button
 var _music_slider: HSlider
 var _sfx_slider: HSlider
@@ -97,6 +112,7 @@ func _ready() -> void:
 	_theme = UiTheme.build()
 	_build_root()
 	_build_hud()
+	_build_touch_buttons()
 	_build_menu()
 	_build_pause()
 	_build_gameover()
@@ -111,6 +127,7 @@ func _ready() -> void:
 	Game.state_changed.connect(_on_state_changed)
 	Game.best_changed.connect(_on_best_changed)
 	Settings.language_changed.connect(_on_language_changed)
+	Settings.changed.connect(_on_setting_changed)
 
 	retranslate()
 	_on_state_changed(Game.state)
@@ -302,6 +319,131 @@ func _build_hud() -> void:
 
 
 # ---------------------------------------------------------------------------
+# On-screen buttons (alternative to swiping)
+# ---------------------------------------------------------------------------
+## Four translucent pads in thumb reach: steer left/right on the leading edge,
+## jump/slide on the trailing edge. They are added to the HUD layer, so they are
+## hidden in menus and paused screens automatically, and they only accept touches
+## that land on the button itself (everything else falls through to the swipe
+## handler).
+func _build_touch_buttons() -> void:
+	_buttons = Control.new()
+	_buttons.name = "TouchButtons"
+	_full_rect(_buttons)
+	_buttons.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(_buttons)
+
+	# Anchored to the bottom corners with a 26 px safe margin. PRESET_MODE_MINSIZE
+	# makes the container exactly as big as its two 96 px pads, so the pads sit in
+	# thumb reach without covering the runner.
+	# Force LTR: Godot mirrors LayoutPresets under an RTL layout direction, which
+	# would put the steer pads on the right thumb and the jump/slide pads on the
+	# left in Arabic. Game controls are spatial, not textual.
+	var left_group := HBoxContainer.new()
+	left_group.name = "LeftPads"
+	left_group.layout_direction = Control.LAYOUT_DIRECTION_LTR
+	left_group.add_theme_constant_override("separation", 14)
+	left_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_buttons.add_child(left_group)
+
+	var right_group := HBoxContainer.new()
+	right_group.name = "RightPads"
+	right_group.layout_direction = Control.LAYOUT_DIRECTION_LTR
+	right_group.add_theme_constant_override("separation", 14)
+	right_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_buttons.add_child(right_group)
+
+	_btn_jump = _pad("JUMP", "JumpButton")
+	_btn_jump.size_flags_horizontal = Control.SIZE_SHRINK_END
+	_btn_jump.pressed.connect(_on_jump_pressed)
+	right_group.add_child(_btn_jump)
+
+	_btn_slide = _pad("SLIDE", "SlideButton")
+	_btn_slide.size_flags_horizontal = Control.SIZE_SHRINK_END
+	_btn_slide.pressed.connect(_on_slide_pressed)
+	right_group.add_child(_btn_slide)
+
+	_btn_left = _pad("<", "PadButton")
+	_btn_left.pressed.connect(_on_left_pressed)
+	left_group.add_child(_btn_left)
+
+	_btn_right = _pad(">", "PadButton")
+	_btn_right.pressed.connect(_on_right_pressed)
+	left_group.add_child(_btn_right)
+
+	# Anchoring has to happen AFTER the pads are children: PRESET_MODE_MINSIZE
+	# computes the offsets from the container's minimum size, which is 0 while it
+	# is still empty. Doing it early left the pads hanging off the bottom edge.
+	left_group.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT,
+			Control.PRESET_MODE_MINSIZE, 26)
+	right_group.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT,
+			Control.PRESET_MODE_MINSIZE, 26)
+
+	_refresh_button_visibility()
+
+
+## 96 px round pad: big enough for a gloved thumb, small enough not to hide the
+## runner on a 5" screen.
+##
+## `theme_type_variation` is the supported way to pick up a type variation: the
+## old `has_stylebox(variation, "Button")` lookup asked for a stylebox *named*
+## after the variation on the base Button type, which never exists, so every pad
+## silently fell back to the stock grey button.
+func _pad(text: String, variation: String) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.theme_type_variation = variation
+	b.theme = _theme
+	b.custom_minimum_size = Vector2(96, 96)
+	b.focus_mode = Control.FOCUS_NONE
+	b.mouse_filter = Control.MOUSE_FILTER_STOP
+	b.modulate.a = 0.88
+	return b
+
+
+func _refresh_button_visibility() -> void:
+	if _buttons == null:
+		return
+	var wanted := Settings.show_buttons or Settings.lane_control == Settings.LaneControl.TOUCH_BUTTONS
+	_buttons.visible = wanted and Game.state == Game.State.RUNNING
+	# The arrows are spatial, not textual: the left pad must always point left,
+	# whatever the UI language. Do not mirror them for RTL.
+	if _btn_left != null:
+		_btn_left.text = "<"
+	if _btn_right != null:
+		_btn_right.text = ">"
+	if _btn_jump != null:
+		_btn_jump.text = Loc.t("buttons.jump")
+	if _btn_slide != null:
+		_btn_slide.text = Loc.t("buttons.slide")
+
+
+func _on_left_pressed() -> void:
+	_forward_input("left")
+
+
+func _on_right_pressed() -> void:
+	_forward_input("right")
+
+
+func _on_jump_pressed() -> void:
+	_forward_input("up")
+
+
+func _on_slide_pressed() -> void:
+	_forward_input("down")
+
+
+## Mirrors the button press to the player. Kept in one place so haptics and the
+## "did the input land" check live together.
+func _forward_input(direction: String) -> void:
+	if Game.state != Game.State.RUNNING:
+		return
+	control_pressed.emit(direction)
+	Settings.vibrate(12)
+
+
+# ---------------------------------------------------------------------------
 # Main menu
 # ---------------------------------------------------------------------------
 func _build_menu() -> void:
@@ -311,7 +453,11 @@ func _build_menu() -> void:
 	_root.add_child(_menu)
 
 	var bg := TextureRect.new()
-	bg.texture = load("res://assets/art/menu_bg.png")
+	# Photographic Khartoum sunset (generated from art_src/ by build_textures.py),
+	# with the old painted art as the fallback for stripped builds.
+	const PHOTO_BG := "res://assets/textures/menu_bg.jpg"
+	bg.texture = load(PHOTO_BG) if ResourceLoader.exists(PHOTO_BG) \
+			else load("res://assets/art/menu_bg.png")
 	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	_full_rect(bg)
@@ -491,7 +637,11 @@ func _build_settings() -> void:
 	box.add_child(_settings_title)
 
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(640, 470)
+	# 500 px is what fits between the title and the back button on a 720 px
+	# viewport (title + scroll + button + separations + panel margins ~ 674).
+	# Taller than that overflows on a 16:9 phone; the rest scrolls.
+	scroll.custom_minimum_size = Vector2(640, 500)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	box.add_child(scroll)
 
@@ -532,17 +682,87 @@ func _build_settings() -> void:
 	var toggles := HBoxContainer.new()
 	toggles.add_theme_constant_override("separation", 10)
 	content.add_child(toggles)
-	_tilt_button = _chip("")
-	_tilt_button.toggle_mode = true
-	_tilt_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_tilt_button.pressed.connect(_on_tilt_pressed)
-	toggles.add_child(_tilt_button)
-
 	_haptics_button = _chip("")
 	_haptics_button.toggle_mode = true
 	_haptics_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_haptics_button.pressed.connect(_on_haptics_pressed)
 	toggles.add_child(_haptics_button)
+
+	# Independent switch: the pads can be added to the swipe scheme or removed
+	# again without changing how the player steers.
+	_buttons_button = _chip("")
+	_buttons_button.toggle_mode = true
+	_buttons_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_buttons_button.pressed.connect(_on_show_buttons_pressed)
+	toggles.add_child(_buttons_button)
+
+	# --- controls: swipes / buttons / gyroscope -------------------------
+	var control_caption := _label("", "MutedLabel", 17)
+	content.add_child(control_caption)
+	_settings_captions["lane"] = control_caption
+	var lane_group := ButtonGroup.new()
+	var lane_row := HBoxContainer.new()
+	lane_row.add_theme_constant_override("separation", 8)
+	content.add_child(lane_row)
+	for i in 3:
+		var chip := _chip("", lane_group)
+		chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		chip.pressed.connect(_on_lane_control_pressed.bind(i))
+		lane_row.add_child(chip)
+		_lane_buttons.append(chip)
+
+	# Gyroscope sensitivity (only meaningful in gyro mode, but always editable).
+	var gyro_caption := _label("", "MutedLabel", 17)
+	content.add_child(gyro_caption)
+	_settings_captions["gyro"] = gyro_caption
+	var gyro_row := HBoxContainer.new()
+	gyro_row.add_theme_constant_override("separation", 12)
+	content.add_child(gyro_row)
+	_gyro_slider = HSlider.new()
+	_gyro_slider.min_value = 0.4
+	_gyro_slider.max_value = 2.5
+	_gyro_slider.step = 0.1
+	_gyro_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_gyro_slider.custom_minimum_size = Vector2(0, 44)
+	_gyro_slider.value_changed.connect(_on_gyro_sensitivity_changed)
+	gyro_row.add_child(_gyro_slider)
+	_gyro_value = _label("1.0x", "MutedLabel", 17)
+	_gyro_value.custom_minimum_size = Vector2(64, 0)
+	_gyro_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	gyro_row.add_child(_gyro_value)
+
+	var gyro_toggles := HBoxContainer.new()
+	gyro_toggles.add_theme_constant_override("separation", 10)
+	content.add_child(gyro_toggles)
+	_invert_button = _chip("")
+	_invert_button.toggle_mode = true
+	_invert_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_invert_button.pressed.connect(_on_gyro_invert_pressed)
+	gyro_toggles.add_child(_invert_button)
+	_photo_button = _chip("")
+	_photo_button.toggle_mode = true
+	_photo_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_photo_button.pressed.connect(_on_photo_graphics_pressed)
+	gyro_toggles.add_child(_photo_button)
+
+	# --- street / district ----------------------------------------------
+	var district_caption := _label("", "MutedLabel", 17)
+	content.add_child(district_caption)
+	_settings_captions["district"] = district_caption
+	# Two columns: the Arabic district names ("شوارع بحري العتيقة") do not fit a
+	# four-across grid on a phone and were being clipped.
+	var district_grid := GridContainer.new()
+	district_grid.columns = 2
+	district_grid.add_theme_constant_override("h_separation", 8)
+	district_grid.add_theme_constant_override("v_separation", 8)
+	content.add_child(district_grid)
+	var district_group := ButtonGroup.new()
+	for i in range(-1, 7):
+		var chip := _chip("", district_group)
+		chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		chip.pressed.connect(_on_district_pressed.bind(i))
+		district_grid.add_child(chip)
+		_district_buttons.append(chip)
 
 	_language_button = _chip("")
 	_language_button.toggle_mode = false
@@ -653,6 +873,7 @@ func _on_state_changed(state: int) -> void:
 	# (or leaving one) always dismisses them.
 	_settings.visible = false
 	_howto.visible = false
+	_refresh_button_visibility()
 	if state == Game.State.MENU:
 		_gameover.visible = false
 		_best_menu_value.text = _format_int(Game.best_score)
@@ -747,8 +968,18 @@ func _refresh_settings_widgets() -> void:
 	var caps := [0, 30, 60, 120]
 	for i in _fps_buttons.size():
 		_fps_buttons[i].button_pressed = Settings.fps_cap == caps[i]
-	_tilt_button.button_pressed = Settings.tilt_enabled
 	_haptics_button.button_pressed = Settings.haptics_enabled
+	_buttons_button.button_pressed = Settings.show_buttons
+	for i in range(mini(_lane_buttons.size(), 3)):
+		_lane_buttons[i].button_pressed = Settings.lane_control == i
+	_gyro_slider.set_value_no_signal(Settings.gyro_sensitivity)
+	_gyro_value.text = "%.1fx" % Settings.gyro_sensitivity
+	_invert_button.button_pressed = Settings.gyro_invert
+	_photo_button.button_pressed = Settings.photo_graphics
+	for i in range(_district_buttons.size()):
+		var value := i - 1          # -1 = auto, 0..6 = districts
+		_district_buttons[i].button_pressed = Settings.district == value
+	_refresh_button_visibility()
 	_music_slider.set_value_no_signal(Settings.music_volume)
 	_sfx_slider.set_value_no_signal(Settings.sfx_volume)
 	_music_value.text = "%d%%" % int(Settings.music_volume * 100.0)
@@ -770,10 +1001,40 @@ func _on_fps_pressed(cap: int) -> void:
 	Settings.set_fps_cap(cap)
 
 
-func _on_tilt_pressed() -> void:
-	Audio.play_click()
-	Settings.set_tilt_enabled(not Settings.tilt_enabled)
+func _on_lane_control_pressed(index: int) -> void:
+	Settings.set_lane_control(index)
 	_refresh_settings_widgets()
+	var key := Settings.lane_control_key(index)
+	show_toast(Loc.t("settings.controls") + ": " + Loc.t("settings.lane_" + key))
+
+
+func _on_gyro_sensitivity_changed(value: float) -> void:
+	Settings.set_gyro_sensitivity(value)
+	_gyro_value.text = "%.1fx" % value
+
+
+func _on_gyro_invert_pressed() -> void:
+	Settings.set_gyro_invert(not Settings.gyro_invert)
+	_refresh_settings_widgets()
+
+
+func _on_photo_graphics_pressed() -> void:
+	Settings.set_photo_graphics(not Settings.photo_graphics)
+	_refresh_settings_widgets()
+	show_toast(Loc.t("settings.photo_graphics") + ": " +
+			Loc.t("settings.on" if Settings.photo_graphics else "settings.off"))
+
+
+func _on_district_pressed(value: int) -> void:
+	Settings.set_district(value)
+	_refresh_settings_widgets()
+	show_toast(Loc.t("settings.district") + ": " + Loc.t("district." + Settings.district_key(value)))
+
+
+## Any setting that changes rendering or input while the settings panel is open
+## (e.g. from the pause menu) needs the live scene to react immediately.
+func _on_setting_changed(_key: String) -> void:
+	_refresh_button_visibility()
 
 
 func _on_haptics_pressed() -> void:
@@ -781,6 +1042,19 @@ func _on_haptics_pressed() -> void:
 	Settings.set_haptics_enabled(not Settings.haptics_enabled)
 	Settings.vibrate(20)
 	_refresh_settings_widgets()
+
+
+## Toggle the on-screen pads. Turning them off while they are the selected
+## scheme also puts swiping back, so the player is never left with no control.
+func _on_show_buttons_pressed() -> void:
+	Audio.play_click()
+	var wanted := not Settings.show_buttons
+	Settings.set_show_buttons(wanted)
+	if not wanted and Settings.lane_control == Settings.LaneControl.TOUCH_BUTTONS:
+		Settings.set_lane_control(Settings.LaneControl.TOUCH_SWIPE)
+	_refresh_settings_widgets()
+	var state_key := "settings.on" if wanted else "settings.off"
+	show_toast(Loc.t("settings.show_buttons") + ": " + Loc.t(state_key))
 
 
 func _on_language_pressed() -> void:
@@ -816,6 +1090,7 @@ func open_settings() -> void:
 func close_overlays() -> void:
 	_settings.visible = false
 	_howto.visible = false
+	_refresh_button_visibility()
 
 
 func _open_howto() -> void:
@@ -880,14 +1155,37 @@ func retranslate() -> void:
 		_preset_buttons[i].text = Loc.t(preset_keys[i])
 	for i in _fps_buttons.size():
 		_fps_buttons[i].text = Loc.t("settings.fps_auto") if i == 0 else str([0, 30, 60, 120][i])
-	_tilt_button.text = Loc.t("settings.tilt")
 	_haptics_button.text = Loc.t("settings.haptics")
+	_buttons_button.text = Loc.t("settings.show_buttons")
+	_settings_captions["lane"].text = Loc.t("settings.controls")
+	for i in range(_lane_buttons.size()):
+		_lane_buttons[i].text = Loc.t("settings.lane_" + Settings.lane_control_key(i))
+	_settings_captions["gyro"].text = Loc.t("settings.gyro")
+	_invert_button.text = Loc.t("settings.gyro_invert")
+	_photo_button.text = Loc.t("settings.photo_graphics")
+	_settings_captions["district"].text = Loc.t("settings.district")
+	for i in range(_district_buttons.size()):
+		_district_buttons[i].text = Loc.t("district." + Settings.district_key(i - 1))
+	_refresh_button_visibility()
 	_reset_button.text = Loc.t("settings.reset")
 	_settings_back_button.text = Loc.t("settings.back")
 
 	_howto_title.text = Loc.t("howto.title")
-	_howto_lines.text = "• %s\n• %s\n• %s\n• %s" % [
-		Loc.t("howto.swipe"), Loc.t("howto.up"), Loc.t("howto.down"), Loc.t("howto.collect")]
+	# The help card must describe the scheme the player actually picked, or it
+	# sends them swiping when the pads are on.
+	var lane_key := "howto.swipe"
+	match Settings.lane_control:
+		Settings.LaneControl.TOUCH_BUTTONS:
+			lane_key = "howto.lane_buttons"
+		Settings.LaneControl.GYROSCOPE:
+			lane_key = "howto.lane_gyro"
+	var lines := PackedStringArray([Loc.t(lane_key)])
+	if Settings.show_buttons and Settings.lane_control != Settings.LaneControl.TOUCH_BUTTONS:
+		lines.append(Loc.t("howto.buttons_extra"))
+	lines.append(Loc.t("howto.up"))
+	lines.append(Loc.t("howto.down"))
+	lines.append(Loc.t("howto.collect"))
+	_howto_lines.text = "• " + "\n• ".join(lines)
 	_howto_ok_button.text = Loc.t("howto.start")
 
 

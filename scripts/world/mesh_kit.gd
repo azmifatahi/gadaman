@@ -24,6 +24,15 @@ static var _mat_road: StandardMaterial3D
 static var _mat_concrete: StandardMaterial3D
 static var _mat_sand: StandardMaterial3D
 static var _mat_glass: StandardMaterial3D
+# Photo caches are separate from the legacy painted ones on purpose: the two
+# sets were sharing `_mat_road`/`_mat_concrete`, so whichever material was built
+# first silently won and the street could render with the old texture.
+static var _mat_road_photo: StandardMaterial3D
+static var _mat_walk_photo: StandardMaterial3D
+static var _mat_facade: Array[StandardMaterial3D] = [null, null, null]
+static var _mat_water: StandardMaterial3D
+static var _mat_steel: StandardMaterial3D
+static var _mat_concrete_photo: StandardMaterial3D
 static var _mat_emissive: Dictionary = {}
 
 
@@ -52,6 +61,55 @@ static func add_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vec
 			st.set_normal(normal)
 			st.set_uv(tri_uv[k])
 			st.add_vertex(tri[k])
+
+
+## Quad with explicit UVs. Used by every photographic surface (roads, facades,
+## water, steel) where the texture has to keep a consistent world-space scale.
+static func add_uv_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3,
+		uv_a: Vector2, uv_b: Vector2, uv_c: Vector2, uv_d: Vector2, color: Color) -> void:
+	var normal := (b - a).cross(c - a).normalized()
+	var verts := [a, b, c, a, c, d]
+	var uvs := [uv_a, uv_b, uv_c, uv_a, uv_c, uv_d]
+	for i in 6:
+		st.set_color(color)
+		st.set_normal(normal)
+		st.set_uv(uvs[i])
+		st.add_vertex(verts[i])
+
+
+## Photographic wall panel.
+##
+## `origin` is the bottom-left corner, `right` the unit vector along the wall and
+## `tile` selects one third of `facade_atlas.jpg`. The texture repeats vertically
+## with a fixed 4 m period so windows keep a believable size on every building,
+## while the horizontal extent always maps exactly once (no stretched windows).
+## Photographic facade panel, in *metres*.
+##
+## The old version mapped one third of the 3-tile atlas across the whole
+## building, which squashed an 8 m shopfront into a 1 m window and left the
+## horizontal slats that made the street look like a texture test. Here the UVs
+## are metric - one texture covers PANEL_W x PANEL_H metres - so a 12 m building
+## shows roughly one and a half shopfronts, exactly like the reference photo.
+const PANEL_W := 9.0          # metres covered by one full texture width
+const PANEL_H := 4.6          # metres covered by one full texture height
+static func add_facade_panel(st: SurfaceTool, origin: Vector3, right: Vector3,
+		width: float, height: float, _tile: int = 0,
+		color: Color = Color.WHITE) -> void:
+	var u1 := maxf(0.35, width / PANEL_W)
+	var v1 := clampf(height / PANEL_H, 0.35, 0.98)
+	var b := origin + right * width
+	var c := origin + right * width + Vector3.UP * height
+	var d := origin + Vector3.UP * height
+	# 2 texel inset keeps bilinear filtering off the texture edge.
+	add_uv_quad(st, origin, b, c, d, Vector2(0.002, 0.004), Vector2(u1, 0.004),
+			Vector2(u1, v1), Vector2(0.002, v1), color)
+
+
+## Flat horizontal quad (roads, water) with world-space UVs in metres / `tile`.
+static func add_uv_ground(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3,
+		tile: float, color: Color = Color.WHITE) -> void:
+	var uv := func(p: Vector3) -> Vector2: return Vector2(p.x / tile, p.z / tile)
+	add_uv_quad(st, a, b, c, d, uv.call(a), uv.call(b), uv.call(c), uv.call(d), color)
 
 
 static func add_tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, color: Color) -> void:
@@ -168,6 +226,22 @@ static func add_flag_panel(st: SurfaceTool, origin: Vector3, width: float, heigh
 				Vector3(apex_x, origin.y + height * 0.5, z), green)
 
 
+## True on the low tier, where normal maps are dropped.
+##
+## Resolved through the scene tree instead of the `Perf` autoload: MeshKit is
+## preloaded by tools/ci_world_check.gd, and an autoload identifier makes that
+## preload fail to compile when the check script is compiled before the
+## singletons are registered ("Identifier not found: Perf").
+static func low_tier() -> bool:
+	var loop := Engine.get_main_loop()
+	if loop is SceneTree:
+		var perf = (loop as SceneTree).root.get_node_or_null("Perf")
+		if perf != null:
+			# PerformanceManager.Tier: 0 = LOW, 1 = MEDIUM, 2 = HIGH.
+			return int(perf.tier) == 0
+	return false
+
+
 # ---------------------------------------------------------------------------
 # Materials (cached)
 # ---------------------------------------------------------------------------
@@ -203,7 +277,7 @@ static func road_material() -> StandardMaterial3D:
 		m.uv1_scale = Vector3(4.0, 26.0, 1.0)
 		m.roughness = 0.78
 		m.roughness_texture = load("res://assets/textures/asphalt_roughness.png")
-		m.normal_enabled = Perf.tier != Perf.Tier.LOW
+		m.normal_enabled = not low_tier()
 		m.normal_texture = load("res://assets/textures/asphalt_normal.png")
 		m.normal_scale = 0.65
 		m.metallic = 0.04
@@ -230,7 +304,9 @@ static func sand_material() -> StandardMaterial3D:
 	if _mat_sand == null:
 		var m := StandardMaterial3D.new()
 		m.albedo_texture = load("res://assets/textures/sand.png")
-		m.uv1_scale = Vector3(9.0, 9.0, 1.0)
+		# Ground UVs are authored in metres by SegmentBuilder (add_uv_ground),
+		# so the material must not scale them again.
+		m.uv1_scale = Vector3(1.0, 1.0, 1.0)
 		m.roughness = 1.0
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
@@ -262,3 +338,165 @@ static func emissive_material(color: Color, energy: float = 1.4) -> StandardMate
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_mat_emissive[key] = m
 	return m
+
+
+# ---------------------------------------------------------------------------
+# Photographic materials (built from tools/build_textures.py output)
+# ---------------------------------------------------------------------------
+## True when the player wants the photographed art. Read live so the Settings
+## switch takes effect on the next material rebuild instead of on the next run.
+static func photo_art_enabled() -> bool:
+	var loop := Engine.get_main_loop()
+	if loop is SceneTree:
+		# Untyped on purpose: `photo_graphics` is a script property, and a
+		# `Node`-typed handle would make this a compile error in GDScript 2.
+		var settings = (loop as SceneTree).root.get_node_or_null("Settings")
+		if settings != null:
+			return bool(settings.photo_graphics)
+	return true
+
+
+## Drop every cached photo material. The surface overrides hold references, so
+## callers must also rebuild their meshes' materials (TrackSegment.refresh_materials).
+static func invalidate_photo_cache() -> void:
+	_mat_road_photo = null
+	_mat_walk_photo = null
+	_mat_facade = [null, null, null]
+	_mat_water = null
+	_mat_steel = null
+	_mat_concrete_photo = null
+
+
+## Warm, flat facades for the non-photo mode: vertex colours still tint each
+## building, so the street keeps its character without a texture fetch.
+static func facade_flat_material() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.albedo_color = Color(0.82, 0.74, 0.62)
+	m.roughness = 0.95
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return m
+
+
+static func water_flat_material() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color("2f5560")
+	m.roughness = 0.18
+	m.metallic = 0.3
+	m.metallic_specular = 0.8
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return m
+
+
+static func steel_flat_material() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color("8d9194")
+	m.metallic = 0.5
+	m.roughness = 0.5
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return m
+
+## Texture repeat has to survive the mobile ETC2/ASTC import. All the photo
+## maps below are imported with mipmaps + anisotropic filtering, which is what
+## keeps a 40 m road from shimmering at speed.
+static func _photo_mat(path: String, tile: Vector2, roughness: float,
+		metallic: float = 0.0) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = load(path)
+	m.uv1_scale = Vector3(tile.x, tile.y, 1.0)
+	m.roughness = roughness
+	m.metallic = metallic
+	m.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return m
+
+
+## Real Khartoum asphalt: albedo + normal + roughness photographed in the city.
+## The UVs are authored in metres (see add_uv_ground) so `uv1_scale` only has to
+## convert metres into "one photo tile".
+static func asphalt_photo_material() -> StandardMaterial3D:
+	if not photo_art_enabled():
+		return road_material()
+	if _mat_road_photo == null:
+		var m := _photo_mat("res://assets/textures/asphalt_photo.jpg",
+				Vector2(1.0 / 2.4, 1.0 / 2.4), 0.82)
+		m.normal_enabled = not low_tier()
+		m.normal_texture = load("res://assets/textures/asphalt_photo_normal.png")
+		m.normal_scale = 0.85
+		m.roughness_texture = load("res://assets/textures/asphalt_photo_rough.png")
+		_mat_road_photo = m
+	return _mat_road_photo
+
+
+static func pavement_photo_material() -> StandardMaterial3D:
+	if not photo_art_enabled():
+		return concrete_material()
+	if _mat_walk_photo == null:
+		var m := _photo_mat("res://assets/textures/pavement_photo.jpg",
+				Vector2(1.0 / 2.0, 1.0 / 2.0), 0.9)
+		m.normal_enabled = not low_tier()
+		m.normal_texture = load("res://assets/textures/pavement_photo_normal.png")
+		m.normal_scale = 0.7
+		_mat_walk_photo = m
+	return _mat_walk_photo
+
+
+## `variant` picks one of the three photographed Bahri shopfronts. They are
+## separate textures rather than one atlas so each keeps its full resolution and
+## the UVs stay metric (see add_facade_panel).
+static func facade_material(variant: int = 0) -> StandardMaterial3D:
+	if not photo_art_enabled():
+		return facade_flat_material()
+	var index := clampi(variant, 0, 2)
+	if _mat_facade[index] != null:
+		return _mat_facade[index]
+	const PATHS := [
+		"res://assets/textures/facade_shops.jpg",
+		"res://assets/textures/facade_ochre.jpg",
+		"res://assets/textures/facade_plaster.jpg",
+	]
+	var m := _photo_mat(PATHS[index], Vector2(1.0, 1.0), 0.9)
+	m.normal_enabled = false
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_mat_facade[index] = m
+	return _mat_facade[index]
+
+
+static func water_photo_material() -> StandardMaterial3D:
+	if not photo_art_enabled():
+		return water_flat_material()
+	if _mat_water == null:
+		var m := _photo_mat("res://assets/textures/water_photo.jpg",
+				Vector2(1.0 / 22.0, 1.0 / 22.0), 0.16)
+		m.metallic = 0.35
+		m.metallic_specular = 0.85
+		m.emission_enabled = true
+		m.emission = Color("2a1c10")
+		m.emission_energy_multiplier = 0.55
+		_mat_water = m
+	return _mat_water
+
+
+static func steel_truss_material() -> StandardMaterial3D:
+	if not photo_art_enabled():
+		return steel_flat_material()
+	if _mat_steel == null:
+		var m := _photo_mat("res://assets/textures/truss_steel.jpg",
+				Vector2(1.0, 1.0), 0.55)
+		m.metallic = 0.55
+		m.normal_enabled = not low_tier()
+		m.normal_texture = load("res://assets/textures/truss_steel_normal.png")
+		m.normal_scale = 1.2
+		_mat_steel = m
+	return _mat_steel
+
+
+static func concrete_photo_material() -> StandardMaterial3D:
+	if not photo_art_enabled():
+		return concrete_material()
+	if _mat_concrete_photo == null:
+		var m := _photo_mat("res://assets/textures/concrete_photo.jpg",
+				Vector2(1.0 / 6.0, 1.0 / 6.0), 0.92)
+		_mat_concrete_photo = m
+	return _mat_concrete_photo
