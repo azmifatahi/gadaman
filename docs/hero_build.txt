@@ -1,12 +1,131 @@
 Godot Engine v4.4.1.stable.official.49a5bc7b6 - https://godotengine.org
 
-SCRIPT ERROR: Parse Error: Identifier "ANIM_GRAPH" not declared in the current scope.
-          at: GDScript::reload (res://scripts/tools/hero_builder.gd:272)
-SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
-          at: GDScript::reload (res://tools/ci_build_hero.gd:0)
-ERROR: Failed to load script "res://tools/ci_build_hero.gd" with error "Compilation failed".
-   at: load (modules/gdscript/gdscript.cpp:3022)
 [CIBuildHero] starting (strict=false)
-SCRIPT ERROR: Invalid call. Nonexistent function 'build_hero' in base 'GDScript'.
-          at: _initialize (res://tools/ci_build_hero.gd:19)
+[HeroBuilder] folder = res://assets/characters/الشخصية/
+[HeroBuilder] files  = ["Falling To Landing.fbx", "Jogging Stumble.fbx", "Jump.fbx", "Run Forward.fbx", "Running Slide.fbx"]
+[HeroBuilder]   Falling To Landing.fbx     meshes=0 verts=    0 bones= 65 clip='fall' anims=[&"mixamo_com"]
+[HeroBuilder]   Jogging Stumble.fbx        meshes=0 verts=    0 bones= 65 clip='stumble' anims=[&"mixamo_com"]
+[HeroBuilder]   Jump.fbx                   meshes=0 verts=    0 bones= 65 clip='jump' anims=[&"mixamo_com"]
+[HeroBuilder]   Run Forward.fbx            meshes=2 verts=28374 bones= 65 clip='jog' anims=[&"Take 001", &"mixamo_com"]
+[HeroBuilder]   Running Slide.fbx          meshes=0 verts=    0 bones= 65 clip='slide' anims=[&"mixamo_com"]
+[HeroBuilder] skin = Run Forward.fbx (28374 verts, 65 bones)
+[HeroBuilder] skeleton 'Skeleton3D' with 65 bones
+[HeroBuilder] clip 'fall' <- 'mixamo_com' (43 tracks)
+[HeroBuilder] clip 'stumble' <- 'mixamo_com' (53 tracks)
+[HeroBuilder] clip 'jump' <- 'mixamo_com' (53 tracks)
+[HeroBuilder] clip 'slide' <- 'mixamo_com' (43 tracks)
+[HeroBuilder] clip 'jog' <- 'Take 001' (53 tracks)
+[HeroBuilder] synthesised 'idle' from 'jog'
+[HeroBuilder] synthesised 'sprint' (1.6x jog)
+[HeroBuilder] synthesised 'land' from 'fall'
+[HeroBuilder] clips in hero AnimationPlayer:
+   fall        1.07s  43 tracks  one-shot
+   idle        1.00s  53 tracks  loop
+   jog         3.33s  53 tracks  loop
+   jump        0.87s  53 tracks  one-shot
+   land        1.07s  43 tracks  one-shot
+   slide       1.53s  43 tracks  one-shot
+   sprint      2.08s  53 tracks  loop
+   stumble     1.17s  53 tracks  one-shot
+[HeroBuilder] hidden rig helper mesh 'Beta_Joints'
+[HeroBuilder] suit material applied to 2 surfaces
+[HeroBuilder] fit: aabb=[P: (-0.902566, -0.000322, -0.148957), S: (1.805132, 1.809205, 0.320699)] height=1.809 scale=0.9839 feet=-0.000 yaw=180.0deg meshes=1
+ERROR: Condition "nodes.has(p_name)" is true.
+   at: add_node (scene/animation/animation_blend_tree.cpp:1452)
+SCRIPT ERROR: Invalid assignment of property or key 'start_node' with value of type 'String' on a base object of type 'AnimationNodeStateMachine'.
+          at: build (res://scripts/player/hero_animation_graph.gd:99)
+[HeroBuilder] assigned owner to 7 nodes
+[HeroBuilder] tree_root before pack: <null>
+[HeroBuilder] jog     length=3.33s tracks=53 moved=0/65 bones
+[HeroBuilder] jump    length=0.87s tracks=53 moved=50/65 bones
+[HeroBuilder] slide   length=1.53s tracks=43 moved=41/65 bones
+WARNING: [HeroBuilder] verify: clip 'jog' plays but moves 0 bones (skeleton would stay in its T-pose)
+     at: push_warning (core/variant/variant_utility.cpp:1118)
+[HeroBuilder] verify: clip 'jog' plays but moves 0 bones (skeleton would stay in its T-pose)
+[HeroBuilder] jog     length=3.33s tracks=53 moved=0/65 bones
+[HeroBuilder] jump    length=0.87s tracks=53 moved=50/65 bones
+[HeroBuilder] slide   length=1.53s tracks=43 moved=41/65 bones
+[CIBuildHero] FAILED: {
+  "bone_span": 1.819669008255,
+  "bones": 65,
+  "clips": {
+    "fall": 43,
+    "jog": 53,
+    "jump": 53,
+    "land": 43,
+    "slide": 43,
+    "stumble": 53
+  },
+  "feet": 0.0000000000582076609134674,
+  "height": 1.78000378608704,
+  "meshes": 2,
+  "motion": {
+    "fall": {
+      "bones": 65,
+      "length": 1.06666994094849,
+      "moved": 41,
+      "playable": true,
+      "tracks": 43
+    },
+    "idle": {
+      "bones": 65,
+      "length": 1.0,
+      "moved": 41,
+      "playable": true,
+      "tracks": 53
+    },
+    "jog": {
+      "bones": 65,
+      "length": 3.33332991600037,
+      "moved": 0,
+      "playable": true,
+      "tracks": 53
+    },
+    "jump": {
+      "bones": 65,
+      "length": 0.866666972637177,
+      "moved": 50,
+      "playable": true,
+      "tracks": 53
+    },
+    "land": {
+      "bones": 65,
+      "length": 1.06666994094849,
+      "moved": 42,
+      "playable": true,
+      "tracks": 43
+    },
+    "slide": {
+      "bones": 65,
+      "length": 1.53332996368408,
+      "moved": 41,
+      "playable": true,
+      "tracks": 43
+    },
+    "sprint": {
+      "bones": 65,
+      "length": 2.08332991600037,
+      "moved": 50,
+      "playable": true,
+      "tracks": 53
+    },
+    "stumble": {
+      "bones": 65,
+      "length": 1.16666996479034,
+      "moved": 51,
+      "playable": true,
+      "tracks": 53
+    }
+  },
+  "ok": false,
+  "path": "res://assets/models/hero/hero.tscn",
+  "problems": [
+    "clip 'jog' plays but moves 0 bones (skeleton would stay in its T-pose)"
+  ],
+  "tree_root": "",
+  "vertices": 28374,
+  "warnings": [
+    "AnimationTree.tree_root is empty (AnimationPlayer fallback will be used)"
+  ]
+}
 First run of Sudan Runner 1.2.2

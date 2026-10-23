@@ -1,5 +1,17 @@
 == AnimationTree block ==
+4505:[node name="AnimationTree" type="AnimationTree" parent="."]
+4506-anim_player = NodePath("../AnimationPlayer")
 == tree_root lines ==
-== sub_resources: 
+== sub_resources: 19
 == ext_resources ==
+3:[ext_resource type="Texture2D" path="res://assets/textures/flag.png" id="1_g6yoq"]
+4:[ext_resource type="Texture2D" path="res://assets/textures/suit_seams_normal.png" id="2_lltbv"]
 == nodes ==
+4022:[node name="Hero" type="Node3D"]
+4024:[node name="Mesh" type="Node3D" parent="."]
+4027:[node name="Skeleton3D" type="Skeleton3D" parent="Mesh"]
+4484:[node name="Beta_Surface" type="MeshInstance3D" parent="Mesh/Skeleton3D"]
+4489:[node name="Beta_Joints" type="MeshInstance3D" parent="Mesh/Skeleton3D"]
+4495:[node name="AnimationPlayer" type="AnimationPlayer" parent="Mesh"]
+4500:[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+4505:[node name="AnimationTree" type="AnimationTree" parent="."]

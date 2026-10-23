@@ -3,4 +3,21 @@ Godot Engine v4.4.1.stable.official.49a5bc7b6 - https://godotengine.org
 [HeroProbe] Godot 4.4.1-stable (official)
 [HeroProbe] RAW import: clips=["Take 001", "mixamo_com"] bones=65 root_node='..'
 [HeroProbe] RAW import: clip='mixamo_com' len=0.583 tracks=53 playing=true moved=51/65 bones
-[HeroProbe] FAILED: res://assets/models/hero/hero.tscn not found
+[HeroProbe] hero children: Mesh, AnimationPlayer, AnimationTree
+[HeroProbe] skeleton=Skeleton3D bones=65
+[HeroProbe] clips=["fall", "idle", "jog", "jump", "land", "slide", "sprint", "stumble"]
+[HeroProbe] saved AnimationTree: active=true tree_root=<null>
+ERROR: Condition "nodes.has(p_name)" is true.
+   at: add_node (scene/animation/animation_blend_tree.cpp:1452)
+SCRIPT ERROR: Invalid assignment of property or key 'start_node' with value of type 'String' on a base object of type 'AnimationNodeStateMachine'.
+          at: build (res://scripts/player/hero_animation_graph.gd:99)
+SCRIPT ERROR: Invalid access to property or key 'resource_name' on a base object of type 'null instance'.
+          at: PlayerAnimationHandler._refresh (res://scripts/player/player_animation_handler.gd:59)
+[HeroProbe] handler mode=0 (NONE) tree_root=<null>
+[HeroProbe] FAILED: handler could not find any animation back-end
+ERROR: Condition "nodes.has(p_name)" is true.
+   at: add_node (scene/animation/animation_blend_tree.cpp:1452)
+SCRIPT ERROR: Invalid assignment of property or key 'start_node' with value of type 'String' on a base object of type 'AnimationNodeStateMachine'.
+          at: build (res://scripts/player/hero_animation_graph.gd:99)
+SCRIPT ERROR: Invalid access to property or key 'resource_name' on a base object of type 'null instance'.
+          at: PlayerAnimationHandler._refresh (res://scripts/player/player_animation_handler.gd:59)

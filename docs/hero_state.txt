@@ -1,3 +1,8 @@
-using_imported_hero=false
+using_imported_hero=true
 model=Model
-model_children=Root
+model_children=Mesh, AnimationPlayer, AnimationTree
+anim_player clip='' playing=false t=0.000 speed=1.00
+anim_tree active=true root=<null>
+handler mode=0 blend=0.13 blend_path='' current='' state='-'
+bones=65
+bone_pose[0..2] mixamorig_Hips=(0.006459, 0, 0, 0.999979), mixamorig_Spine=(-0.080156, 0.0, -0.0, 0.996782), mixamorig_Spine1=(0, 0, 0, 1)
