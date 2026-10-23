@@ -326,7 +326,9 @@ static func emissive_material(color: Color, energy: float = 1.4) -> StandardMate
 static func photo_art_enabled() -> bool:
 	var loop := Engine.get_main_loop()
 	if loop is SceneTree:
-		var settings: Node = (loop as SceneTree).root.get_node_or_null("Settings")
+		# Untyped on purpose: `photo_graphics` is a script property, and a
+		# `Node`-typed handle would make this a compile error in GDScript 2.
+		var settings = (loop as SceneTree).root.get_node_or_null("Settings")
 		if settings != null:
 			return bool(settings.photo_graphics)
 	return true

@@ -95,13 +95,19 @@ jobs:
           # The procedural world cannot be reviewed from a diff: this builds all
           # 7 districts, checks each photographic surface has UVs and that the
           # lane-control/district settings round-trip.
-          set -o pipefail
+          set +e
           timeout 180 godot --headless --script tools/ci_world_check.gd 2>&1 \
             | tee world_check.log | tail -n 40
-          grep -q "\[CIWorld\] OK" world_check.log || {
-            echo "::error::procedural streets failed validation"
+          status=${PIPESTATUS[0]}
+          set -e
+          if ! grep -q "\[CIWorld\] OK" world_check.log; then
+            # Logs live in blob storage that some environments cannot reach, so
+            # every diagnostic line is re-emitted as a check annotation.
+            grep -aE "\[CIWorld\]|SCRIPT ERROR|Parse Error|ERROR:" world_check.log \
+              | head -n 30 | while IFS= read -r line; do echo "::error title=world_check::${line}"; done
+            echo "::error::procedural streets failed validation (godot exit ${status})"
             exit 1
-          }
+          fi
 
       - name: Probe hero animation (strict)
         run: |
@@ -160,7 +166,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: smoke-log
-          path: smoke.log
+          path: |
+            smoke.log
+            world_check.log
+            hero_verify.log
+            hero_probe.log
           if-no-files-found: ignore
 
       - name: Upload built hero + .godot cache for APK job
@@ -463,7 +473,15 @@ jobs:
           set -o pipefail
           timeout 240 xvfb-run -a -s "-screen 0 1280x720x24" \
             godot --rendering-driver opengl3 --resolution 1280x720 -- --screenshot 2>&1 | tee shots.log || true
-          grep -E "SHOT|SCREENSHOTS_DONE|ERROR" shots.log | tail -n 20 || true
+          # Annotations instead of plain log lines: the raw logs are served from
+          # blob storage that some environments cannot reach.
+          grep -aE "SHOT|SCREENSHOTS_DONE|SCRIPT ERROR|Parse Error|ERROR:" shots.log \
+            | tail -n 25 | while IFS= read -r line; do echo "::notice title=shots::${line}"; done
+          if ! grep -q "SCREENSHOTS_DONE" shots.log; then
+            grep -aE "SCRIPT ERROR|Parse Error|ERROR:|Cannot|Invalid" shots.log | head -n 10 \
+              | while IFS= read -r line; do echo "::error title=shots::${line}"; done
+            echo "::error::screenshot session did not reach SCREENSHOTS_DONE"
+          fi
           mkdir -p docs/screenshots
           USER_DIR="$HOME/.local/share/godot/app_userdata/Sudan Runner"
           ls -la "$USER_DIR" || true

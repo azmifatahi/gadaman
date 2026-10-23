@@ -1165,7 +1165,7 @@ func retranslate() -> void:
 			lane_key = "howto.lane_buttons"
 		Settings.LaneControl.GYROSCOPE:
 			lane_key = "howto.lane_gyro"
-	var lines: Array[String] = [Loc.t(lane_key)]
+	var lines := PackedStringArray([Loc.t(lane_key)])
 	if Settings.show_buttons and Settings.lane_control != Settings.LaneControl.TOUCH_BUTTONS:
 		lines.append(Loc.t("howto.buttons_extra"))
 	lines.append(Loc.t("howto.up"))

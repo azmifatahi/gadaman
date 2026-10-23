@@ -27,13 +27,21 @@ const EXPECTED := {
 }
 
 var _problems: Array[String] = []
+var _summary: Dictionary = {}
 
 
 func _initialize() -> void:
 	print("[CIWorld] godot %s" % Engine.get_version_info().string)
+	var autoloads := PackedStringArray()
+	for child in root.get_children():
+		autoloads.append(String(child.name))
+	print("[CIWorld] root children: %s" % ", ".join(autoloads))
 	_check_textures()
 	_check_segments()
 	_check_settings()
+	# Always echo what was actually built: when this job fails in CI the log is
+	# often unreachable, but annotations are not.
+	print("[CIWorld] summary %s" % JSON.stringify(_summary))
 	if _problems.is_empty():
 		print("[CIWorld] OK: every district builds with its photographic surfaces.")
 		quit(0)
@@ -99,9 +107,9 @@ func _check_segments() -> void:
 						_problems.append("variant %d surface '%s' has no UVs" % [variant, names[i]])
 			if tris < 200:
 				_problems.append("variant %d slot %d has only %d triangles" % [variant, slot, tris])
-			if variant == 0 and slot == 0:
-				print("[CIWorld] variant 0: %d surfaces %s, %d triangles" % [
-					mesh.get_surface_count(), names, tris])
+			_summary["v%d_s%d" % [variant, slot]] = {
+				"surfaces": names, "tris": tris, "mesh_surfaces": mesh.get_surface_count(),
+			}
 	print("[CIWorld] districts: %d variants x %d slots built" % [
 		SEGMENTS.VARIANT_COUNT, SEGMENTS.CACHE_SLOTS])
 
