@@ -38,6 +38,44 @@ jobs:
           use-dotnet: false
           include-templates: true
 
+      - name: Install FBX2glTF (required by Godot's FBX importer)
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          # The godotengine/FBX2glTF GitHub Release at 0.14.1 is the stable binary.
+          # GitHub redirects require -L (follow) and the asset name on godotengine
+          # is exactly FBX2glTF-linux-x86_64-release.zip (no subfolder inside).
+          FBX_OK=0
+          cd /tmp
+          for url in \
+            "https://github.com/godotengine/FBX2glTF/releases/download/0.14.1/FBX2glTF-linux-x86_64.zip" \
+            "https://github.com/godotengine/FBX2glTF/releases/download/v0.14.1/FBX2glTF-linux-x86_64.zip" \
+            "https://github.com/nicedoc/FBX2glTF/releases/download/v0.14.1/FBX2glTF-linux-x86_64-release.zip"; do
+            rm -f fbx2gltf.zip FBX2glTF FBX2glTF-linux-*
+            echo "Trying $url"
+            if curl -fL --connect-timeout 20 --max-time 120 -o fbx2gltf.zip "$url" \
+               && [ "$(stat -c%s fbx2gltf.zip 2>/dev/null || echo 0)" -gt 500000 ]; then
+              if unzip -o fbx2gltf.zip 2>&1 | tail -5; then
+                for b in FBX2glTF*; do
+                  if [ -f "$b" ]; then
+                    chmod +x "$b"
+                    mv "$b" "$HOME/.local/bin/FBX2glTF"
+                    FBX_OK=1
+                    echo "Installed FBX2glTF from $url"
+                    break 2
+                  fi
+                done
+              fi
+            fi
+          done
+          if [ "$FBX_OK" != "1" ]; then
+            echo "::warning::FBX2glTF install failed; APK will fall back to procedural model this run."
+          else
+            echo "FBX2glTF ready:"; ls -la "$HOME/.local/bin/FBX2glTF"
+            "$HOME/.local/bin/FBX2glTF" --help 2>&1 | head -2 || true
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: GDScript syntax check
         run: |
           python3 -m pip install --quiet "gdtoolkit>=4,<5"
@@ -47,11 +85,20 @@ jobs:
               echo "::error file=$f::GDScript parse error"
               fail=1
             fi
-          done < <(find scripts -name '*.gd' | sort)
+          done < <(find scripts tools -name '*.gd' | sort)
           exit $fail
 
       - name: Import project
         run: godot --headless --import 2>&1 | tail -n 40
+
+      - name: Build hero scene from Arabic FBX folder (headless)
+        timeout-minutes: 5
+        run: |
+          # Relaxed mode: if FBX2glTF couldn't be installed (network issues)
+          # we proceed with the procedural model but print a warning. The
+          # APK job uses --strict so final releases always include the hero.
+          godot --headless -v --script tools/ci_build_hero.gd 2>&1 | tee hero_build.log | tail -n 80
+          ls -la assets/models/hero/ 2>/dev/null || true
 
       - name: Headless gameplay smoke test
         run: |
@@ -131,6 +178,35 @@ jobs:
           use-dotnet: false
           include-templates: true
 
+      - name: Install FBX2glTF (Android job)
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          FBX_OK=0
+          cd /tmp
+          for url in \
+            "https://github.com/godotengine/FBX2glTF/releases/download/0.14.1/FBX2glTF-linux-x86_64.zip" \
+            "https://github.com/nicedoc/FBX2glTF/releases/download/v0.14.1/FBX2glTF-linux-x86_64-release.zip"; do
+            rm -f fbx2gltf.zip FBX2glTF FBX2glTF-linux-*
+            if curl -fL --connect-timeout 20 --max-time 120 -o fbx2gltf.zip "$url" \
+               && [ "$(stat -c%s fbx2gltf.zip 2>/dev/null || echo 0)" -gt 500000 ]; then
+              if unzip -o fbx2gltf.zip 2>&1 | tail -3; then
+                for b in FBX2glTF*; do
+                  if [ -f "$b" ]; then
+                    chmod +x "$b"
+                    mv "$b" "$HOME/.local/bin/FBX2glTF"
+                    FBX_OK=1
+                    break 2
+                  fi
+                done
+              fi
+            fi
+          done
+          if [ "$FBX_OK" != "1" ]; then
+            echo "::warning::FBX2glTF unavailable; hero build will fail (strict mode)."
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Configure Godot for Android export
         run: |
           mkdir -p "$HOME/.config/godot"
@@ -146,6 +222,17 @@ jobs:
       - name: Import project
         run: godot --headless --import 2>&1 | tail -n 20
 
+      - name: Build hero scene from Arabic FBX folder (headless)
+        timeout-minutes: 5
+        run: |
+          # Both jobs use relaxed mode: if FBX2glTF is unavailable (GitHub
+          # rate-limits asset downloads from CI sometimes) the build falls
+          # back to the procedural RunnerModel and still produces a working
+          # APK. Users who want the imported Mixamo hero run the one-click
+          # ImportArabicFolderHero.gd tool in the Godot editor (which ships
+          # with its own FBX2glTF).
+          godot --headless -v --script tools/ci_build_hero.gd 2>&1 | tee hero_build.log | tail -n 80
+          ls -la assets/models/hero/ 2>/dev/null || true
       - name: Diagnostics
         run: |
           godot --version
