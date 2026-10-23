@@ -112,10 +112,11 @@ func _do_build(allow_fallback := true) -> bool:
 		var largest_size := -1
 		for f in files:
 			var fp := arabic_dir.path_join(f)
-			var is_fbx := f.to_lower().ends_with(".fbx")
+			var fn_low: String = f.to_lower()
+			var is_fbx: bool = fn_low.ends_with(".fbx")
 			if is_fbx and not _fbx2gltf_available():
 				continue
-			var sz := FileAccess.get_file_as_bytes(fp).size()
+			var sz: int = FileAccess.get_file_as_bytes(fp).size()
 			if sz > largest_size:
 				largest_size = sz
 				largest_name = f
@@ -183,7 +184,7 @@ func _mkdir(path: String) -> void:
 	if da == null:
 		printerr("[HeroBuilder] Cannot open res://")
 		return
-	var rel: String = path.trim_prefix("res://").rtrim("/")
+	var rel: String = path.trim_prefix("res://").strip_edges(false, true).rstrip("/")
 	if rel.begins_with("assets/"):
 		var parts: PackedStringArray = rel.split("/")
 		var cur: String = ""
@@ -379,7 +380,7 @@ func _ensure_canonical(lib: AnimationLibrary) -> void:
 				continue
 			idle.add_track(jog.track_get_type(t))
 			idle.track_set_path(idle.get_track_count() - 1, jog.track_get_path(t))
-			var val := jog.track_get_key_value(t, 0)
+			var val: Variant = jog.track_get_key_value(t, 0)
 			idle.track_insert_key(idle.get_track_count() - 1, 0.0, val)
 			idle.track_insert_key(idle.get_track_count() - 1, 1.0, val)
 		lib.add_animation("idle", idle)
@@ -434,38 +435,40 @@ func _build_state_machine() -> AnimationNodeStateMachine:
 	var lean := AnimationNodeBlend2.new()
 	lean.amount = 0.0
 	loco.add_node("lean", lean, Vector2(280, 80))
-	loco.connect_node("lean", 0, "locomotion", 0)
-	loco.connect_node("lean", 1, "locomotion", 0)
-	loco.connect_node("output", 0, "lean", 0)
+	loco.connect_node("lean", 0, "locomotion")
+	loco.connect_node("lean", 1, "locomotion")
+	loco.connect_node("output", 0, "lean")
 	sm.add_node("locomotion", loco, Vector2(0, 0))
 
-	var add_state := func(nm: String, pos: Vector2):
-		sm.add_node(nm, _anim(nm), pos)
-	add_state("jump",    Vector2(280, -150))
-	add_state("fall",    Vector2(520, -150))
-	add_state("land",    Vector2(780, -150))
-	add_state("slide",   Vector2(280,  150))
-	add_state("stumble", Vector2(560,  150))
+	sm.add_node("jump",    _anim("jump"),    Vector2(280, -150))
+	sm.add_node("fall",    _anim("fall"),    Vector2(520, -150))
+	sm.add_node("land",    _anim("land"),    Vector2(780, -150))
+	sm.add_node("slide",   _anim("slide"),   Vector2(280,  150))
+	sm.add_node("stumble", _anim("stumble"), Vector2(560,  150))
 
-	var add_trans := func(from: String, to: String, xfade: float, auto: bool):
-		var t := AnimationNodeStateMachineTransition.new()
-		t.switch_mode = AnimationNodeStateMachineTransition.SWITCH_MODE_AT_END if auto \
-				else AnimationNodeStateMachineTransition.SWITCH_MODE_IMMEDIATE
-		t.fade_time = xfade
-		t.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_AUTO if auto \
-				else AnimationNodeStateMachineTransition.ADVANCE_MODE_ENABLED
-		sm.add_transition(from, to, t)
-	add_trans("locomotion", "jump",   0.08, false)
-	add_trans("jump",       "fall",   0.10, true)
-	add_trans("fall",       "land",   0.10, true)
-	add_trans("land",       "locomotion", 0.12, true)
-	add_trans("locomotion", "slide",  0.06, false)
-	add_trans("slide",      "locomotion", 0.10, true)
-	add_trans("locomotion", "stumble",0.10, false)
-	add_trans("stumble",    "locomotion", 0.12, true)
-	add_trans("jump",       "slide",  0.08, false)
+	_add_sm_trans(sm, "locomotion", "jump",   0.08, false)
+	_add_sm_trans(sm, "jump",       "fall",   0.10, true)
+	_add_sm_trans(sm, "fall",       "land",   0.10, true)
+	_add_sm_trans(sm, "land",       "locomotion", 0.12, true)
+	_add_sm_trans(sm, "locomotion", "slide",  0.06, false)
+	_add_sm_trans(sm, "slide",      "locomotion", 0.10, true)
+	_add_sm_trans(sm, "locomotion", "stumble",0.10, false)
+	_add_sm_trans(sm, "stumble",    "locomotion", 0.12, true)
+	_add_sm_trans(sm, "jump",       "slide",  0.08, false)
 	sm.start_node = "locomotion"
 	return sm
+
+
+func _add_sm_trans(sm: AnimationNodeStateMachine, from: String, to: String, xfade: float, auto: bool) -> void:
+	var t := AnimationNodeStateMachineTransition.new()
+	if auto:
+		t.switch_mode = AnimationNodeStateMachineTransition.SWITCH_MODE_AT_END
+		t.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_AUTO
+	else:
+		t.switch_mode = AnimationNodeStateMachineTransition.SWITCH_MODE_IMMEDIATE
+		t.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_ENABLED
+	t.fade_time = xfade
+	sm.add_transition(from, to, t)
 
 
 func _anim(name: String) -> AnimationNodeAnimation:
