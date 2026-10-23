@@ -152,36 +152,30 @@ jobs:
           use-dotnet: false
           include-templates: true
 
-      - name: Configure Godot for Android export
-        run: |
-          mkdir -p "$HOME/.config/godot"
-          godot --headless --editor --quit || true
-          python3 tools/ci_configure_android.py
-
       - name: Import project (Godot 4.4 ufbx handles FBX natively)
         run: |
-          # Mirror the validate job exactly: two headless import passes.
+          # Mirror the validate job exactly: NO godot --editor --quit here,
+          # just two headless import passes. Editor init before --import has
+          # been shown to break the ufbx loader on fresh runners.
           godot --headless --import 2>&1 | tail -n 40
           godot --headless --import 2>&1 | tail -n 10
-
-      - name: Verify FBX files were imported
-        run: |
-          find .godot/imported -name "*Run*Forward*.scn" -o -name "*Jump*.scn" -o -name "*Slide*.scn" 2>/dev/null | head -10 || true
 
       - name: Build hero scene from Arabic FBX folder (STRICT)
         timeout-minutes: 5
         run: |
-          set -x
           godot --headless -v --script tools/ci_build_hero.gd -- --strict 2>&1 | tee hero_build.log | tail -n 80
           if ! grep -q "Hero build OK" hero_build.log; then
             echo "::error::Hero build failed in APK job – aborting export."
-            echo "--- full hero_build.log ---"
             cat hero_build.log
-            echo "--- arabic folder ---"
             ls -la "assets/characters/الشخصية/" 2>/dev/null
             exit 1
           fi
           ls -la assets/models/hero/
+
+      - name: Configure Godot for Android export
+        run: |
+          mkdir -p "$HOME/.config/godot"
+          python3 tools/ci_configure_android.py
       - name: Diagnostics
         run: |
           godot --version
