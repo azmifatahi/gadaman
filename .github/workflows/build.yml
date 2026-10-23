@@ -160,12 +160,15 @@ jobs:
 
       - name: Import project (native ufbx FBX importer, Godot 4.4)
         run: |
-          # First pass registers the FBX files with the ufbx importer.
+          # In the APK job we have a FRESH checkout so we have to create the
+          # editor settings first, then run import in editor mode (which
+          # processes importer defaults and writes .import files), then in
+          # headless mode. Validate gets away with just headless because it
+          # does a quit-after smoke run that forces reimport as a side effect.
+          mkdir -p "$HOME/.config/godot"
+          godot --headless --editor --quit 2>&1 | tail -5 || true
           godot --headless --import 2>&1 | tail -n 40
-          # Second pass reimports any deferred assets (animations, meshes).
           godot --headless --import 2>&1 | tail -n 10
-          # Dump what Godot now sees inside the Arabic folder so the logs show
-          # us exactly which FBX files produced usable PackedScenes.
           echo "--- .godot/imported (FBX-related) ---"
           find .godot/imported -iname "*run*" -o -iname "*jump*" -o -iname "*slide*" -o -iname "*stumble*" -o -iname "*fall*" -o -iname "*land*" 2>/dev/null | head -20
 
