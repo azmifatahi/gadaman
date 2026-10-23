@@ -225,7 +225,6 @@ func _build_hero_from_scene(skin_scene: PackedScene, skin_path: String, clips: D
 	var hero := Node3D.new()
 	hero.name = "Hero"
 
-	var skin_scene: PackedScene = load(skin_path)
 	if skin_scene == null:
 		push_error("[HeroBuilder] Cannot load skin %s" % skin_path)
 		return hero
