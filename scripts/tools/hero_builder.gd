@@ -108,6 +108,18 @@ func _do_build(strict := false) -> bool:
 	# let the editor/import step finish first.
 	var skin_scene: PackedScene = _safe_load_scene(skin_path)
 	if skin_scene == null:
+		print("[HeroBuilder] DEBUG: ResourceLoader.exists=%s for %s" % [ResourceLoader.exists(skin_path), skin_path])
+		# Dump what Godot actually imported under the Arabic folder.
+		var da2: DirAccess = DirAccess.open(folder)
+		if da2:
+			da2.list_dir_begin()
+			var n2: String = da2.get_next()
+			while n2 != "":
+				if n2 != "." and n2 != ".." and not da2.current_is_dir():
+					var full2: String = folder.path_join(n2)
+					print("[HeroBuilder] DEBUG: asset '%s' exists=%s" % [n2, ResourceLoader.exists(full2)])
+				n2 = da2.get_next()
+			da2.list_dir_end()
 		_issue("Could not load skin mesh %s (import may have failed)" % skin_path, strict)
 		return false
 
