@@ -1,7 +1,7 @@
 using_imported_hero=true
 model=Model
 model_children=Mesh, AnimationPlayer
-anim_player clip='jog' playing=true t=0.312 speed=1.00
+anim_player clip='jog' playing=true t=0.292 speed=1.00
 handler clip='jog' blend=0.13 locked=false playing=true
 bones=65
-bone_pose[0..2] mixamorig_Hips=(0.168861, -0.00118, -0.007023, 0.985614), mixamorig_Spine=(-0.032827, -0.06811, -0.014557, 0.997031), mixamorig_Spine1=(0.032714, -0.021985, -0.005052, 0.99921)
+bone_pose[0..2] mixamorig_Hips=(0.170308, 0.002918, 0.004975, 0.985374), mixamorig_Spine=(-0.029662, -0.048215, -0.023437, 0.998121), mixamorig_Spine1=(0.033297, -0.015521, -0.006991, 0.999301)
