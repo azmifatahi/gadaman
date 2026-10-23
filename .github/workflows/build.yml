@@ -104,6 +104,15 @@ jobs:
           path: smoke.log
           if-no-files-found: ignore
 
+      - name: Upload built hero + .godot cache for APK job
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-hero
+          path: |
+            assets/models/hero/
+            .godot/
+          if-no-files-found: error
+
   # ---------------------------------------------------------------------------
   # 2. Export a signed (debug key) APK. Debug signing keeps the workflow usable
   #    without any repository secret; add a release keystore for store builds.
@@ -152,37 +161,41 @@ jobs:
           use-dotnet: false
           include-templates: true
 
-      - name: Import project (Godot 4.4 ufbx handles FBX natively)
-        run: |
-          # Mirror the validate job exactly: NO godot --editor --quit here,
-          # just two headless import passes. Editor init before --import has
-          # been shown to break the ufbx loader on fresh runners.
-          godot --headless --import 2>&1 | tail -n 40
-          godot --headless --import 2>&1 | tail -n 10
+      - name: Download pre-built hero from validate job
+        uses: actions/download-artifact@v4
+        with:
+          name: built-hero
+          path: /tmp/built-hero
+          merge-multiple: false
 
-      - name: Build hero scene from Arabic FBX folder (STRICT)
-        timeout-minutes: 5
+      - name: Restore hero scene + ufbx import cache from validate job
         run: |
-          godot --headless -v --script tools/ci_build_hero.gd -- --strict 2>&1 | tee hero_build.log | tail -n 80
-          if ! grep -q "Hero build OK" hero_build.log; then
-            echo "::error::Hero build failed in APK job – aborting export."
-            cat hero_build.log
-            ls -la "assets/characters/الشخصية/" 2>/dev/null
-            exit 1
+          # The validate job successfully ran two --import passes and built
+          # hero.tscn. Restore that .godot/imported cache so the APK job
+          # doesn't have to re-invoke ufbx on a possibly-crippled fresh
+          # checkout, and place the hero scene where PlayerController expects
+          # it so the game loads the real mesh rather than the capsule
+          # fallback.
+          mkdir -p .godot assets/models/hero
+          if [ -d /tmp/built-hero/.godot ]; then
+            cp -a /tmp/built-hero/.godot/. .godot/
+          fi
+          if [ -d /tmp/built-hero/assets/models/hero ]; then
+            cp -av /tmp/built-hero/assets/models/hero/. assets/models/hero/
           fi
           ls -la assets/models/hero/
+          echo "=== imported cache FBX files ==="
+          find .godot/imported -iname "*fbx*" 2>/dev/null | head -20
+          # Verify hero.tscn exists or fail strictly.
+          if [ ! -f assets/models/hero/hero.tscn ]; then
+            echo "::error::validate job didn't produce hero.tscn – aborting APK export."
+            exit 1
+          fi
 
       - name: Configure Godot for Android export
         run: |
           mkdir -p "$HOME/.config/godot"
           python3 tools/ci_configure_android.py
-      - name: Diagnostics
-        run: |
-          godot --version
-          ls -la "$HOME/.local/share/godot/export_templates" || true
-          ls -la "$HOME/.config/godot" || true
-          ls "$ANDROID_SDK_ROOT/build-tools" || true
-          ls -la "$HOME/.android" || true
 
       - name: Restore stable signing keystore from cache
         id: keystore-cache
