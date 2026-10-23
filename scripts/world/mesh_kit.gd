@@ -220,6 +220,22 @@ static func add_flag_panel(st: SurfaceTool, origin: Vector3, width: float, heigh
 				Vector3(apex_x, origin.y + height * 0.5, z), green)
 
 
+## True on the low tier, where normal maps are dropped.
+##
+## Resolved through the scene tree instead of the `Perf` autoload: MeshKit is
+## preloaded by tools/ci_world_check.gd, and an autoload identifier makes that
+## preload fail to compile when the check script is compiled before the
+## singletons are registered ("Identifier not found: Perf").
+static func low_tier() -> bool:
+	var loop := Engine.get_main_loop()
+	if loop is SceneTree:
+		var perf = (loop as SceneTree).root.get_node_or_null("Perf")
+		if perf != null:
+			# PerformanceManager.Tier: 0 = LOW, 1 = MEDIUM, 2 = HIGH.
+			return int(perf.tier) == 0
+	return false
+
+
 # ---------------------------------------------------------------------------
 # Materials (cached)
 # ---------------------------------------------------------------------------
@@ -255,7 +271,7 @@ static func road_material() -> StandardMaterial3D:
 		m.uv1_scale = Vector3(4.0, 26.0, 1.0)
 		m.roughness = 0.78
 		m.roughness_texture = load("res://assets/textures/asphalt_roughness.png")
-		m.normal_enabled = Perf.tier != Perf.Tier.LOW
+		m.normal_enabled = not low_tier()
 		m.normal_texture = load("res://assets/textures/asphalt_normal.png")
 		m.normal_scale = 0.65
 		m.metallic = 0.04
@@ -399,7 +415,7 @@ static func asphalt_photo_material() -> StandardMaterial3D:
 	if _mat_road_photo == null:
 		var m := _photo_mat("res://assets/textures/asphalt_photo.jpg",
 				Vector2(1.0 / 2.4, 1.0 / 2.4), 0.82)
-		m.normal_enabled = Perf.tier != Perf.Tier.LOW
+		m.normal_enabled = not low_tier()
 		m.normal_texture = load("res://assets/textures/asphalt_photo_normal.png")
 		m.normal_scale = 0.85
 		m.roughness_texture = load("res://assets/textures/asphalt_photo_rough.png")
@@ -413,7 +429,7 @@ static func pavement_photo_material() -> StandardMaterial3D:
 	if _mat_walk_photo == null:
 		var m := _photo_mat("res://assets/textures/pavement_photo.jpg",
 				Vector2(1.0 / 2.0, 1.0 / 2.0), 0.9)
-		m.normal_enabled = Perf.tier != Perf.Tier.LOW
+		m.normal_enabled = not low_tier()
 		m.normal_texture = load("res://assets/textures/pavement_photo_normal.png")
 		m.normal_scale = 0.7
 		_mat_walk_photo = m
@@ -454,7 +470,7 @@ static func steel_truss_material() -> StandardMaterial3D:
 		var m := _photo_mat("res://assets/textures/truss_steel.jpg",
 				Vector2(1.0, 1.0), 0.55)
 		m.metallic = 0.55
-		m.normal_enabled = Perf.tier != Perf.Tier.LOW
+		m.normal_enabled = not low_tier()
 		m.normal_texture = load("res://assets/textures/truss_steel_normal.png")
 		m.normal_scale = 1.2
 		_mat_steel = m
