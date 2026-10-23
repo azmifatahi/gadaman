@@ -439,8 +439,10 @@ static func _build_market(tools: Dictionary, rng: RandomNumberGenerator, density
 static func _stall(st: SurfaceTool, side: float, z: float,
 		rng: RandomNumberGenerator) -> void:
 	var x: float = side * (INNER - 0.6)
-	var cloth: Color = [Color("#c98a4b"), Color("#8a6f9b"), Color("#6f88a8"),
-			Color("#7f8f68"), Color("#b4695a")][rng.randi_range(0, 4)]
+	# Dust-faded canvas: even "bright" market cloth in Khartoum is sun-bleached
+	# within a season, and saturated primaries are what read as cartoon.
+	var cloth: Color = [Color("#b98553"), Color("#7d7186"), Color("#6d8095"),
+			Color("#77835f"), Color("#a86d5c")][rng.randi_range(0, 4)]
 	# Counter + legs.
 	MeshKit.add_box(st, Vector3(x, 0.82, z), Vector3(1.9, 0.12, 2.6), PALETTE["wood"])
 	for sx: float in [-0.8, 0.8]:
@@ -531,19 +533,34 @@ static func _railing(st: SurfaceTool, side: float, z: float, span: float, height
 				Vector3(0.07, height, 0.07), PALETTE["white"])
 
 
+## Nile palm. The fronds are long and *narrow*: a 0.9 m wide blade seen from
+## 3 m away is a green sheet, which is exactly what the old version looked like.
+## Nine 0.2 m fronds per crown read as a palm at chase-camera distance.
 static func _palm(st: SurfaceTool, base: Vector3, rng: RandomNumberGenerator) -> void:
-	var h := rng.randf_range(5.0, 7.5)
-	MeshKit.add_cylinder(st, base, 0.22, h, Color("#7a6142"), 6, 0.14)
-	for i in 7:
-		var a := TAU * float(i) / 7.0
+	var h := rng.randf_range(5.2, 7.8)
+	# Slight lean, so a row of palms is not a picket fence.
+	var lean := Vector3(rng.randf_range(-0.35, 0.35), 0, rng.randf_range(-0.25, 0.25))
+	var top := base + Vector3(0, h, 0) + lean
+	MeshKit.add_cylinder(st, base, 0.2, h, Color("#6f5940"), 6, 0.13)
+	MeshKit.add_cylinder(st, top - Vector3(0, 0.5, 0), 0.42, 0.55,
+			Color("#4a3a28"), 6)
+	for i in 9:
+		var a := TAU * float(i) / 9.0 + rng.randf_range(-0.2, 0.2)
 		var dir := Vector3(cos(a), 0, sin(a))
-		var mid := base + Vector3(0, h, 0) + dir * 1.1 + Vector3(0, 0.35, 0)
-		var tip := base + Vector3(0, h, 0) + dir * 2.4 + Vector3(0, -0.5, 0)
-		var perp := Vector3(-dir.z, 0.35, dir.x) * 0.45
-		MeshKit.add_quad(st, mid - perp, mid + perp, tip + perp * 0.25, tip - perp * 0.25,
-				PALETTE["palm"])
-	MeshKit.add_box(st, base + Vector3(0, h - 0.2, 0), Vector3(0.5, 0.5, 0.5),
-			PALETTE["leaf_dark"])
+		var reach := rng.randf_range(1.5, 2.3)
+		var mid := top + dir * (reach * 0.55) + Vector3(0, 0.3, 0)
+		var tip := top + dir * reach + Vector3(0, -rng.randf_range(0.5, 1.1), 0)
+		var perp := Vector3(-dir.z, 0.25, dir.x) * rng.randf_range(0.14, 0.22)
+		var col: Color = PALETTE["palm"].darkened(rng.randf_range(0.0, 0.2))
+		MeshKit.add_quad(st, mid - perp, mid + perp, tip + perp * 0.3, tip - perp * 0.3, col)
+	# Dead fronds hanging under the crown - every Khartoum palm has them.
+	for i in 4:
+		var a := TAU * float(i) / 4.0 + 0.4
+		var dir := Vector3(cos(a), 0, sin(a))
+		var tip := top + dir * 0.9 + Vector3(0, -1.5, 0)
+		var perp := Vector3(-dir.z, 0.0, dir.x) * 0.12
+		MeshKit.add_quad(st, top - perp, top + perp, tip + perp, tip - perp,
+				Color("#8a7448"))
 
 
 # ---------------------------------------------------------------------------

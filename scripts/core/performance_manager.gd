@@ -298,9 +298,13 @@ func apply_to_environment(env: Environment) -> void:
 	env.glow_enabled = post_effects_enabled
 	env.glow_intensity = 0.55 if post_effects_enabled else 0.0
 	env.ssao_enabled = post_effects_enabled
-	env.adjustment_enabled = tier == Tier.HIGH
-	env.adjustment_saturation = 1.06
-	env.adjustment_contrast = 1.02
+	# A mild grade on every tier above LOW. The art is photographic now, so the
+	# job of this pass is to *remove* the remaining cartoon saturation and add
+	# back a little film contrast, not to punch the colours up.
+	env.adjustment_enabled = tier != Tier.LOW
+	env.adjustment_saturation = 0.92
+	env.adjustment_contrast = 1.06
+	env.adjustment_brightness = 1.0
 
 
 func apply_to_sun(light: DirectionalLight3D, _camera: Camera3D = null) -> void:
