@@ -637,7 +637,11 @@ func _build_settings() -> void:
 	box.add_child(_settings_title)
 
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(640, 470)
+	# 500 px is what fits between the title and the back button on a 720 px
+	# viewport (title + scroll + button + separations + panel margins ~ 674).
+	# Taller than that overflows on a 16:9 phone; the rest scrolls.
+	scroll.custom_minimum_size = Vector2(640, 500)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	box.add_child(scroll)
 
