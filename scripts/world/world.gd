@@ -110,6 +110,13 @@ func _apply_sky(photo_sky: PanoramaSkyMaterial) -> void:
 	_environment.tonemap_mode = Environment.TONE_MAPPER_ACES if has_photo \
 			else Environment.TONE_MAPPER_FILMIC
 	_environment.tonemap_exposure = 1.05 if has_photo else 1.0
+	# Equirect textures wrap at u = 0, which is exactly the -Z direction the chase
+	# camera looks down: the seam landed dead centre of every frame. Turning the
+	# dome 180 deg puts it behind the player.
+	if has_photo:
+		_environment.sky_rotation = Vector3(0.0, PI, 0.0)
+	else:
+		_environment.sky_rotation = Vector3.ZERO
 	var skyline := get_node_or_null("KhartoumSkyline")
 	if has_photo:
 		if skyline == null:

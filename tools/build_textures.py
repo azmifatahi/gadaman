@@ -304,16 +304,17 @@ def flatten_azimuth(band: Image.Image) -> Image.Image:
     return out
 
 
-def paint_sun(dome: Image.Image, u: float = 0.035, v: float = 0.465) -> Image.Image:
+def paint_sun(dome: Image.Image, u: float = 0.535, v: float = 0.465) -> Image.Image:
     """Paint one soft sun + glow at (u, v) of the equirect dome.
 
     Computed per pixel instead of by stacking ellipses: stacked shapes band
     visibly on a smooth horizon and read as a square blob. The falloff is
     exponential (like real scattering) with a small bright core.
 
-    `u = 0` is the direction the chase camera looks at (Godot's panorama sky maps
-    -Z to u = 0), so a small positive u puts the sun just right of the runner,
-    low over the horizon: the Khartoum dusk the whole art direction is built on.
+    Godot's panorama sky maps -Z to u = 0, and world.gd rotates the dome by 180
+    deg to hide the texture wrap behind the player. u = 0.5 + 0.035 therefore puts
+    the sun just right of the runner, low over the horizon: the Khartoum dusk the
+    whole art direction is built on.
     """
     w, h = dome.size
     cx = int(w * u) % w
