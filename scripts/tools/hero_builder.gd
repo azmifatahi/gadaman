@@ -1084,12 +1084,17 @@ func _probe_clip_motion(ap: AnimationPlayer, skel: Skeleton3D) -> Dictionary:
 		var anim := ap.get_animation(raw_name)
 		if anim == null:
 			continue
-		var before := _pose_snapshot(skel)
 		ap.play(raw_name)
 		var playable := ap.is_playing()
+		var moved := 0
 		if playable:
+			# Compare two moments *inside the same clip*. Comparing against the
+			# rest pose would also "pass" for Mixamo's static bind-pose take, which
+			# is exactly the trap that shipped v1.2.2's T-pose.
+			ap.seek(0.0, true)
+			var start_pose := _pose_snapshot(skel)
 			ap.seek(minf(anim.length * 0.5, 0.4), true)
-		var moved := _count_moved_poses(before, _pose_snapshot(skel))
+			moved = _count_moved_poses(start_pose, _pose_snapshot(skel))
 		out[key] = {
 			"length": anim.length,
 			"tracks": anim.get_track_count(),

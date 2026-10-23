@@ -242,17 +242,18 @@ jobs:
             exit 1
           fi
 
-      - name: Ensure import + script class cache
+      - name: Import project (sidecars + script class cache)
         run: |
-          if [ ! -f .godot/global_script_class_cache.cfg ]; then
-            echo "::warning::.godot cache missing – running a full import pass."
-            godot --headless --import 2>&1 | tail -n 5
-          fi
-          python3 - <<'PY'
-          import os
-          print("Class cache:", os.path.exists(".godot/global_script_class_cache.cfg"))
-          print("Hero scene :", os.path.exists("assets/models/hero/hero.tscn"))
-          PY
+          # `.import` sidecars live next to each asset and are therefore NOT part
+          # of the uploaded `.godot` cache. Without them every texture fails with
+          # "No loader found for resource: res://assets/textures/flag.png", which
+          # is exactly how the APK job died right after the hero started using
+          # real materials. Importing is idempotent (~40 s) and also rebuilds the
+          # script class cache the strict verifier needs.
+          godot --headless --import 2>&1 | tail -n 20
+          godot --headless --import 2>&1 | tail -n 5
+          test -f .godot/global_script_class_cache.cfg || { echo "::error::script class cache missing after import"; exit 1; }
+          test -f assets/textures/flag.png.import || { echo "::error::texture import sidecars missing"; exit 1; }
 
       - name: Verify restored hero scene (strict)
         run: |
