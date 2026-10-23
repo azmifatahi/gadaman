@@ -89,8 +89,16 @@ func _do_build(allow_fallback := true) -> bool:
 			if key != "":
 				anim_clips[key] = full
 	if skin_path == "":
-		files.sort_custom(func(a, b): return FileAccess.get_file_as_bytes(arabic_dir.path_join(a)).size() < FileAccess.get_file_as_bytes(arabic_dir.path_join(b)).size())
-		skin_path = arabic_dir.path_join(files[-1])
+		# Fallback: pick the largest file as the skin.
+		var largest_name := ""
+		var largest_size := -1
+		for f in files:
+			var fp := arabic_dir.path_join(f)
+			var sz := FileAccess.get_file_as_bytes(fp).size()
+			if sz > largest_size:
+				largest_size = sz
+				largest_name = f
+		skin_path = arabic_dir.path_join(largest_name)
 	print("[HeroBuilder] skin = %s, clips = %s" % [skin_path.get_file(), anim_clips.keys()])
 
 	# Try to load the skin FBX (this may fail headlessly if FBX2glTF is
