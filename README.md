@@ -21,9 +21,9 @@
 | --- | --- | --- |
 | ![slide](docs/screenshots/shot_05_slide.png) | ![howto](docs/screenshots/shot_02_howto.png) | ![pause](docs/screenshots/shot_06_pause.png) |
 
-| كبري المك نمر / Mac Nimir bridge | الأزرار على الشاشة / On-screen pads |
-| --- | --- |
-| ![bridge](docs/screenshots/shot_03b_bridge.png) | ![buttons](docs/screenshots/shot_03c_buttons.png) |
+| كبري المك نمر / Mac Nimir bridge | كورنيش النيل / Nile corniche | الأزرار على الشاشة / On-screen pads |
+| --- | --- | --- |
+| ![bridge](docs/screenshots/shot_03b_bridge.png) | ![corniche](docs/screenshots/shot_03d_corniche.png) | ![buttons](docs/screenshots/shot_03c_buttons.png) |
 
 > هذه الصور مُلتقطة آليًا من بناء الـ CI نفسه (`godot --screenshot` مع مُصيّر برمجي) — أي أنها تعكس ما ستراه على الجهاز تمامًا.
 > Captured automatically by CI from the real build on a software GL renderer.
@@ -448,8 +448,9 @@ keytool -genkeypair -v -keystore release.keystore -alias sudanrunner \
 ## 9. الاختبار / Testing
 
 ```bash
-# اختبار لعب كامل بلا شاشة (يُستخدم في CI)
+# اختبار لعب كامل بلا شاشة + اختبار التحمّل (SOAK) — يُستخدم في CI
 godot --headless --quit-after 1200 -- --smoke
+# يطبع SMOKE_OK و SOAK_OK (لا بناء أشكال أثناء الجولة + الـ heap ثابت)
 
 # فحص صياغة كل السكربتات
 pip install "gdtoolkit>=4,<5" && for f in $(find scripts -name '*.gd'); do gdparse "$f"; done
