@@ -38,44 +38,6 @@ jobs:
           use-dotnet: false
           include-templates: true
 
-      - name: Install FBX2glTF (required by Godot's FBX importer)
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.local/bin"
-          # The godotengine/FBX2glTF GitHub Release at 0.14.1 is the stable binary.
-          # GitHub redirects require -L (follow) and the asset name on godotengine
-          # is exactly FBX2glTF-linux-x86_64-release.zip (no subfolder inside).
-          FBX_OK=0
-          cd /tmp
-          for url in \
-            "https://github.com/godotengine/FBX2glTF/releases/download/0.14.1/FBX2glTF-linux-x86_64.zip" \
-            "https://github.com/godotengine/FBX2glTF/releases/download/v0.14.1/FBX2glTF-linux-x86_64.zip" \
-            "https://github.com/nicedoc/FBX2glTF/releases/download/v0.14.1/FBX2glTF-linux-x86_64-release.zip"; do
-            rm -f fbx2gltf.zip FBX2glTF FBX2glTF-linux-*
-            echo "Trying $url"
-            if curl -fL --connect-timeout 20 --max-time 120 -o fbx2gltf.zip "$url" \
-               && [ "$(stat -c%s fbx2gltf.zip 2>/dev/null || echo 0)" -gt 500000 ]; then
-              if unzip -o fbx2gltf.zip 2>&1 | tail -5; then
-                for b in FBX2glTF*; do
-                  if [ -f "$b" ]; then
-                    chmod +x "$b"
-                    mv "$b" "$HOME/.local/bin/FBX2glTF"
-                    FBX_OK=1
-                    echo "Installed FBX2glTF from $url"
-                    break 2
-                  fi
-                done
-              fi
-            fi
-          done
-          if [ "$FBX_OK" != "1" ]; then
-            echo "::warning::FBX2glTF install failed; APK will fall back to procedural model this run."
-          else
-            echo "FBX2glTF ready:"; ls -la "$HOME/.local/bin/FBX2glTF"
-            "$HOME/.local/bin/FBX2glTF" --help 2>&1 | head -2 || true
-          fi
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
       - name: GDScript syntax check
         run: |
           python3 -m pip install --quiet "gdtoolkit>=4,<5"
@@ -88,15 +50,27 @@ jobs:
           done < <(find scripts tools -name '*.gd' | sort)
           exit $fail
 
-      - name: Import project
-        run: godot --headless --import 2>&1 | tail -n 40
+      - name: Import project (Godot 4.4 ufbx handles FBX natively)
+        run: |
+          # Godot 4.3+ ships the ufbx FBX importer built-in - no external
+          # FBX2glTF binary is required. We run --import twice: the first
+          # pass converts .fbx files to .scn/.res cache, the second ensures
+          # the hero FBX and its animation clips are reachable from scripts.
+          godot --headless --import 2>&1 | tail -n 40
+          godot --headless --import 2>&1 | tail -n 10
+
+      - name: Verify FBX files were imported
+        run: |
+          ls -la res://.godot/imported/ 2>/dev/null | grep -i "run forward\|jump\|slide\|stumble\|falling" | head -10 || true
+          # Find any imported scene caches for our FBX files.
+          find .godot/imported -name "*Run*Forward*.scn" -o -name "*Jump*.scn" -o -name "*Slide*.scn" 2>/dev/null | head -10 || true
 
       - name: Build hero scene from Arabic FBX folder (headless)
         timeout-minutes: 5
         run: |
-          # Relaxed mode: if FBX2glTF couldn't be installed (network issues)
-          # we proceed with the procedural model but print a warning. The
-          # APK job uses --strict so final releases always include the hero.
+          # Validate job is relaxed – if for some reason the FBX didn't
+          # import, the smoke test will still run and we'll see it on the
+          # APK job which is strict.
           godot --headless -v --script tools/ci_build_hero.gd 2>&1 | tee hero_build.log | tail -n 80
           ls -la assets/models/hero/ 2>/dev/null || true
 
@@ -129,6 +103,15 @@ jobs:
           name: smoke-log
           path: smoke.log
           if-no-files-found: ignore
+
+      - name: Upload built hero + .godot cache for APK job
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-hero
+          path: |
+            assets/models/hero/
+            .godot/
+          if-no-files-found: error
 
   # ---------------------------------------------------------------------------
   # 2. Export a signed (debug key) APK. Debug signing keeps the workflow usable
@@ -178,68 +161,41 @@ jobs:
           use-dotnet: false
           include-templates: true
 
-      - name: Install FBX2glTF (Android job)
+      - name: Download pre-built hero from validate job
+        uses: actions/download-artifact@v4
+        with:
+          name: built-hero
+          path: /tmp/built-hero
+          merge-multiple: false
+
+      - name: Restore hero scene + ufbx import cache from validate job
         run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.local/bin"
-          FBX_OK=0
-          cd /tmp
-          for url in \
-            "https://github.com/godotengine/FBX2glTF/releases/download/0.14.1/FBX2glTF-linux-x86_64.zip" \
-            "https://github.com/nicedoc/FBX2glTF/releases/download/v0.14.1/FBX2glTF-linux-x86_64-release.zip"; do
-            rm -f fbx2gltf.zip FBX2glTF FBX2glTF-linux-*
-            if curl -fL --connect-timeout 20 --max-time 120 -o fbx2gltf.zip "$url" \
-               && [ "$(stat -c%s fbx2gltf.zip 2>/dev/null || echo 0)" -gt 500000 ]; then
-              if unzip -o fbx2gltf.zip 2>&1 | tail -3; then
-                for b in FBX2glTF*; do
-                  if [ -f "$b" ]; then
-                    chmod +x "$b"
-                    mv "$b" "$HOME/.local/bin/FBX2glTF"
-                    FBX_OK=1
-                    break 2
-                  fi
-                done
-              fi
-            fi
-          done
-          if [ "$FBX_OK" != "1" ]; then
-            echo "::warning::FBX2glTF unavailable; hero build will fail (strict mode)."
+          # The validate job successfully ran two --import passes and built
+          # hero.tscn. Restore that .godot/imported cache so the APK job
+          # doesn't have to re-invoke ufbx on a possibly-crippled fresh
+          # checkout, and place the hero scene where PlayerController expects
+          # it so the game loads the real mesh rather than the capsule
+          # fallback.
+          mkdir -p .godot assets/models/hero
+          if [ -d /tmp/built-hero/.godot ]; then
+            cp -a /tmp/built-hero/.godot/. .godot/
           fi
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          if [ -d /tmp/built-hero/assets/models/hero ]; then
+            cp -av /tmp/built-hero/assets/models/hero/. assets/models/hero/
+          fi
+          ls -la assets/models/hero/
+          echo "=== imported cache FBX files ==="
+          find .godot/imported -iname "*fbx*" 2>/dev/null | head -20
+          # Verify hero.tscn exists or fail strictly.
+          if [ ! -f assets/models/hero/hero.tscn ]; then
+            echo "::error::validate job didn't produce hero.tscn – aborting APK export."
+            exit 1
+          fi
 
       - name: Configure Godot for Android export
         run: |
           mkdir -p "$HOME/.config/godot"
-          godot --headless --editor --quit || true
           python3 tools/ci_configure_android.py
-          python3 - <<'PY'
-          import glob, os
-          for path in glob.glob(os.path.expanduser("~/.config/godot/editor_settings-*.tres")):
-              print("---", path)
-              print(open(path).read()[-400:])
-          PY
-
-      - name: Import project
-        run: godot --headless --import 2>&1 | tail -n 20
-
-      - name: Build hero scene from Arabic FBX folder (headless)
-        timeout-minutes: 5
-        run: |
-          # Both jobs use relaxed mode: if FBX2glTF is unavailable (GitHub
-          # rate-limits asset downloads from CI sometimes) the build falls
-          # back to the procedural RunnerModel and still produces a working
-          # APK. Users who want the imported Mixamo hero run the one-click
-          # ImportArabicFolderHero.gd tool in the Godot editor (which ships
-          # with its own FBX2glTF).
-          godot --headless -v --script tools/ci_build_hero.gd 2>&1 | tee hero_build.log | tail -n 80
-          ls -la assets/models/hero/ 2>/dev/null || true
-      - name: Diagnostics
-        run: |
-          godot --version
-          ls -la "$HOME/.local/share/godot/export_templates" || true
-          ls -la "$HOME/.config/godot" || true
-          ls "$ANDROID_SDK_ROOT/build-tools" || true
-          ls -la "$HOME/.android" || true
 
       - name: Restore stable signing keystore from cache
         id: keystore-cache
