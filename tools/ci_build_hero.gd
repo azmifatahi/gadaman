@@ -2,24 +2,21 @@
 ## =============================================================================
 ##  ci_build_hero.gd  —  Headless hero build for GitHub Actions.
 ##  ----------------------------------------------------------------------------
-##  Invoked after `godot --headless --import` and before the APK export. It
-##  builds assets/models/hero/hero.tscn directly (no MainLoop await needed),
-##  then exits with 0 on success / non-zero on failure.
-##
-##  Usage:  godot --headless --script tools/ci_build_hero.gd
+##  When run via `godot --headless --script <path>`, Godot attaches the script
+##  to the SceneTree and calls _initialize() once. We build the hero
+##  synchronously there and call quit() immediately. We DO NOT use await here
+##  because headless --script mode does not pump the main loop the way a
+##  running scene does, so awaiting a signal/frame hangs forever.
 ## =============================================================================
-extends RefCounted
+extends SceneTree
 
 
-func _init() -> void:
-	# When running via --headless --script, Godot executes _init() synchronously
-	# then quits. Using await/SceneTree here can hang because the main loop
-	# never pumps. Build the hero directly.
+func _initialize() -> void:
 	print("[CIBuildHero] Starting automated hero build")
 	var ok := HeroBuilder.build_hero()
 	if not ok:
 		printerr("[CIBuildHero] Hero build FAILED")
-		OS.exit_code = 1
+		quit(1)
 		return
 	print("[CIBuildHero] Hero build OK -> %s" % HeroBuilder.HERO_SCENE_PATH)
-	OS.exit_code = 0
+	quit(0)

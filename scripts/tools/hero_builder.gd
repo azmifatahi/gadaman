@@ -110,14 +110,22 @@ func _do_build() -> bool:
 ## UTF-8 safe directory helpers
 ## ---------------------------------------------------------------------------
 func _mkdir(path: String) -> void:
-	# Ensure the hero output directory exists. Use DirAccess at "res://" so
-	# relative make_dir_recursive works under the project root.
+	# Ensure the hero output directory exists. DirAccess.make_dir_recursive
+	# creates missing intermediate directories relative to the project root.
 	var da := DirAccess.open("res://")
 	if da == null:
+		printerr("[HeroBuilder] Cannot open res://")
 		return
-	var rel := path.trim_prefix("res://").trim_suffix("/")
-	if rel != "":
-		da.make_dir_recursive(rel)
+	var rel := path.trim_prefix("res://").rtrim("/")
+	if rel.begins_with("assets/"):
+		# Walk down and make sure assets/models exists first.
+		var parts := rel.split("/")
+		var cur := ""
+		for p in parts:
+			cur += p
+			if not da.dir_exists(cur):
+				da.make_dir(cur)
+			cur += "/"
 
 
 func _locate_arabic_folder() -> String:
