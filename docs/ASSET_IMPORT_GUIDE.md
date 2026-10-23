@@ -20,13 +20,12 @@
 5. Rename imported animations to:
    `jog`, `sprint`, `ultra_sprint`, `jump`, `fall`, `land`, `slide`, `stumble`,
    `recover`, `chest_bump`, `hurdle`, `crash`. Loop only locomotion clips.
-6. Add `AnimationTree`, assign the imported `AnimationPlayer`, and set Active.
-   Make a StateMachine containing Locomotion, Air, Slide, Stumble, Bump and Crash.
-   Locomotion contains a BlendSpace1D with jog=0, sprint=0.55, ultra=1. Feed it
-   `PlayerController.run_blend`. Add a -1/0/1 lane additive blend fed by
-   `PlayerController.lane_blend`. Transitions to one-shots should use the existing
-   controller signals (`jumped`, `landed`, `slide_started`, `stumbled`,
-   `recovered`, `obstacle_smashed`).
+6. Do **not** add an `AnimationTree`; the game drives the `AnimationPlayer`
+   directly (`scripts/player/player_animation_handler.gd`) and cross-fades
+   idle → jog → sprint from `PlayerController.run_blend`, with one-shots fired by
+   the controller signals (`jumped`, `landed`, `slide_started`, `stumbled`,
+   `recovered`, `obstacle_smashed`). A tree whose graph is lost when the scene is
+   packed will silently override the player and freeze the character.
 7. Select the imported hero root and run
    `scripts/tools/SetupRealisticRunner.gd` from the Script Editor. It applies the
    Sudan chrome PBR suit and creates a local reflection probe. Replace materials

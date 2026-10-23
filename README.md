@@ -91,7 +91,9 @@ gadaman/
 │   │   └── game_manager.gd       # حالة الجولة، النقاط، الكومبو، أفضل نتيجة
 │   ├── player/
 │   │   ├── player_controller.gd  # الحارات، القفز، الانحناء، السحب/الإمالة
-│   │   └── runner_model.gd       # نموذج الشخصية (علم السودان) وتحريكه الإجرائي
+│   │   ├── player_animation_handler.gd # تشغيل مقاطع الـ AnimationPlayer
+│   │   ├── hero_material.gd      # بدلة العلم (Material آمن على gl_compatibility)
+│   │   └── runner_model.gd       # نموذج احتياطي إجرائي (يظهر دائمًا)
 │   ├── world/
 │   │   ├── world.gd              # المنسّق: الإضاءة، الربط، دورة حياة الجولة
 │   │   ├── track_manager.gd      # توليد المسار + تجميع العوائق + التصادم
@@ -110,10 +112,14 @@ gadaman/
 │   ├── art/       (أيقونة العلم، خلفية القائمة، الشعار، أكواب HUD)
 │   ├── textures/  (أسفلت، رمل، علم، ظل، دخان)
 │   ├── audio/     (موسيقى + 9 مؤثرات OGG)
+│   ├── characters/الشخصية/  (مجلد الشخصية: Run Forward + Jump + Slide + …)
+│   ├── models/hero/hero.tscn  (مُولَّد آليًا من مجلد الشخصية — غير مُتتبَّع في git)
 │   └── fonts/     (Cairo — SIL OFL)
 ├── tools/
 │   ├── generate_assets.py        # يعيد توليد كل الصور (Pillow)
 │   ├── generate_audio.py         # يعيد توليد الموسيقى والمؤثرات (numpy + ffmpeg)
+│   ├── ci_build_hero.gd          # يبني hero.tscn من مجلد الشخصية (CI/المحرر)
+│   ├── ci_verify_hero.gd         # يتحقق أن الشخصية فعلاً تُرسم (صارم في CI)
 │   └── ci_configure_android.py   # يضبط مسارات Android SDK في CI
 └── .github/workflows/build.yml   # فحص + اختبار headless + تصدير APK
 ```
@@ -137,6 +143,71 @@ Track.prop_hit ──▶ World: Player.die() + Camera.shake() + FX.crash() + Toa
 | الكوب | 10 × المضاعف (1 → 5) |
 | الكومبو | كل 5 أكواب متتالية (خلال 2.2 ثانية) ترفع المضاعف |
 | الإنجاز | كل 250 متر: مؤثر صوتي + اهتزاز + احتفال بصري |
+
+---
+
+## 3.1 الشخصية / The runner character
+
+**مجلد الشخصية هو المصدر الوحيد للشخصية:**
+`assets/characters/الشخصية/` (FBX من Mixamo). اللعبة **لا** ترسم مجسمًا مبرمجًا
+عندما تكون الشخصية الحقيقية متاحة، وتستخدم `RunnerModel` كخطة بديلة فقط.
+
+| الملف | الاستخدام |
+| --- | --- |
+| `Run Forward.fbx` | هو الملف الوحيد الذي يحتوي على **مجسم + هيكل عظمي** (Skin) — يُستخدم كجسم الشخصية، وحركته تُستخدم كـ `jog`. |
+| `Jump.fbx` · `Running Slide.fbx` · `Jogging Stumble.fbx` · `Falling To Landing.fbx` | مقاطع حركة فقط (بدون Skin) → `jump` · `slide` · `stumble` · `fall` (+ `land`). |
+
+### كيف تُبنى الشخصية؟
+
+```bash
+# المحرر: افتح scripts/tools/ImportArabicFolderHero.gd واضغط Ctrl+Shift+X
+# أو من سطر الأوامر (نفس ما يفعله CI):
+godot --headless --import
+godot --headless --script tools/ci_build_hero.gd -- --strict
+godot --headless --script tools/ci_verify_hero.gd -- --strict
+```
+
+`HeroBuilder` يقوم بالتالي:
+
+1. **يفحص محتوى كل ملف** (عدد الرؤوس والعظام) — لا يعتمد على اسم الملف أو حجمه
+   ولا على قراءة بايتات من الـ FBX، لأن ملفات `.fbx` غير موجودة أصلاً داخل APK.
+2. يختار الملف الذي يحتوي على أكبر مجسم = **الجلد (Skin)**.
+3. **يعيد توجيه (Retarget)** كل مسارات الحركة من هيكل ملف المقطع إلى هيكل الشخصية
+   (`Mesh/<Skeleton>:<Bone>`)، ويحوّل مسارات العقد العادية إلى مسارات عظام
+   (مقاطع Mixamo "Without Skin" تُصدَّر كعقد Node3D عادية).
+4. يطبّع الارتفاع إلى **1.78 م**، يضع القدمين على `Y=0`، ويدير الشخصية لتنظر
+   بعيدًا عن الكاميرا (`-Z`).
+5. **يعيّن `owner` لكل عقدة قبل `PackedScene.pack()`** — بدون ذلك يحذف Godot
+   الشجرة كاملة عند الحفظ (هذا سبب اختفاء الشخصية في 1.2.x).
+6. **يختار الـ Take المتحرّك لا الساكن:** ملفات Mixamo تحتوي عادة على مقطعين:
+   `mixamo.com` (الحركة الحقيقية) و`Take 001` (نسخة ساكنة بطول كامل من وضع
+   الـ T-pose). الاختيار القديم كان يعدّ المسارات فقط فيأخذ `Take 001` ويشحن
+   شخصية متجمّدة؛ الآن يُقيَّم كل مقطع بعدد المفاتيح المتغيّرة فعليًا.
+7. **يقرأ المشهد المحفوظ ويتحقق منه** (`verify()`): مجسم مرئي، ارتفاع منطقي،
+   هيكل عظمي غير منهار، وكل الحركات المطلوبة قابلة للتشغيل. ثم **يشغّل كل مقطع
+   فعليًا** ويعدّ العظام التي تغيّر وضعها بين لحظتين داخل المقطع — لأن وجود
+   المسارات لا يعني وجود حركة. لو فشل أي شرط يفشل بناء الـ APK.
+
+> 🎬 **لا يوجد `AnimationTree` في اللعبة.** المشهد يحتوي `AnimationPlayer` واحدًا
+> فقط، و`PlayerAnimationHandler` هو من يشغّل المقاطع (idle → jog → sprint بحسب
+> سرعة المسار، وjump/fall/land/slide/stumble لمرة واحدة). السبب: `tree_root` لا
+> ينجو دائمًا من `PackedScene.pack()`، وشجرة فارغة تتجاوز الـ AnimationPlayer
+> وتُجمّد الهيكل — وهذا بالضبط سبب وضع الـ T-pose في 1.2.2.
+
+> 🛟 **شبكة أمان مزدوجة:** `PlayerController` يتحقق أيضًا من `hero.tscn` وقت
+> التشغيل؛ إن كان فارغًا أو غير قابل للرسم يستخدم `RunnerModel` الإجرائي فورًا،
+> فلا يمكن أن تختفي الشخصية مرة أخرى.
+
+**ملاحظات مهمة:**
+
+* لا تُشغّل بناء الشخصية وقت التشغيل داخل APK: ملفات الـ FBX الأصلية ليست
+  موجودة في الحزمة — البناء يحدث في CI/المحرر فقط.
+* أسماء الملفات ليست مقدّسة: أي اسم يحتوي `run`/`jump`/`slide`/`stumble`/`fall`
+  سيُصنَّف تلقائيًا. أضف `idle`/`sprint` لو أردت حركات مخصّصة (تُولَّد تلقائيًا
+  إن غابت).
+* بدلة العلم تُستخدم بمعدن منخفض (`metallic = 0.05`) عن قصد: على
+  `gl_compatibility` لا توجد انعكاسات، والمعدن العالي يجعل الشخصية سوداء تكاد
+  لا تُرى على الأسفلت ليلاً.
 
 ---
 
@@ -264,6 +335,6 @@ pip install "gdtoolkit>=4,<5" && for f in $(find scripts -name '*.gd'); do gdpar
 ### ترقية الرسومات الواقعية / Semi-realistic art upgrade
 
 راجع [`docs/ASSET_IMPORT_GUIDE.md`](docs/ASSET_IMPORT_GUIDE.md) لخطوات Mixamo/GLB
-والـAnimationTree وتراخيص Poly Pizza/Sketchfab. يمكن تشغيل
+وتشغيل مقاطع الحركة (AnimationPlayer) وتراخيص Poly Pizza/Sketchfab. يمكن تشغيل
 `scripts/tools/SetupRealisticRunner.gd` من محرر Godot بعد تحديد نموذج البطل لتطبيق
 بدلة السودان المعدنية وReflectionProbe تلقائياً.

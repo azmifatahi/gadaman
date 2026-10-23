@@ -14,7 +14,7 @@
 ##
 ## This controller supports two visual back-ends:
 ##   1. The imported Mixamo hero (res://assets/models/hero/hero.tscn) — uses an
-##      AnimationTree with run_blend/lane_blend and one-shots driven by
+##      AnimationPlayer with run_blend/lane_blend and one-shots driven by
 ##      PlayerAnimationHandler.
 ##   2. The legacy procedural RunnerModel — used as a graceful fallback if the
 ##      hero scene hasn't been imported yet (e.g. in CI headless runs).
@@ -72,11 +72,10 @@ var _invulnerability_timer := 0.0
 var _last_intensity := -1.0
 
 # Visual back-end references. Either _procedural (RunnerModel) is populated or
-# _hero + _anim_player + _anim_tree + _anim_handler are; both paths work.
+# _hero + _anim_player + _anim_handler are; both paths work.
 var _model: RunnerModel
 var _hero: Node3D
 var _anim_player: AnimationPlayer
-var _anim_tree: AnimationTree
 var _anim_handler: Node
 var _blob: MeshInstance3D
 var _using_imported_hero: bool = false
@@ -92,38 +91,86 @@ func _ready() -> void:
 
 
 func _attach_model() -> void:
-	# Safety net: if the hero scene isn't built yet (first launch before any
-	# editor/CI build step ever ran), try to build it on the fly. HeroBuilder
-	# is the same code CI uses headlessly; running it at _ready() is safe
-	# because ResourceLoader.exists(HERO_SCENE_PATH) is the fast path.
-	if not ResourceLoader.exists(HERO_SCENE_PATH):
-		if Engine.is_editor_hint():
-			pass  # In the editor the user is expected to run ImportArabicFolderHero.gd.
-		else:
-			HeroBuilder.build_if_missing()
-	# Prefer the imported hero scene; fall back to the procedural model if
-	# the hero scene doesn't exist (CI, first checkout before running the
-	# import tool).
+	# Editor convenience only: when the generated hero scene has never been
+	# produced, build it once from the FBX folder. This is NOT done at runtime:
+	# an exported game does not ship the raw .fbx files nor their import cache,
+	# so a runtime rebuild cannot work (that is how v1.2.x ended up drawing an
+	# empty armature).
+	if Engine.is_editor_hint() and not ResourceLoader.exists(HERO_SCENE_PATH):
+		HeroBuilder.build_if_missing()
+
+	# Prefer the generated hero scene — but only if it is actually drawable.
 	if ResourceLoader.exists(HERO_SCENE_PATH):
 		var hero_scene: PackedScene = load(HERO_SCENE_PATH)
 		if hero_scene:
-			_hero = hero_scene.instantiate()
-			_hero.name = "Model"
-			add_child(_hero)
-			_anim_player = _hero.get_node_or_null("AnimationPlayer") as AnimationPlayer
-			_anim_tree = _hero.get_node_or_null("AnimationTree") as AnimationTree
-			_using_imported_hero = true
-			# Make sure the tree is active.
-			if _anim_tree:
-				_anim_tree.active = true
-			print("[PlayerController] Imported Mixamo hero attached at %s" % _hero.global_position)
-			return
-	push_warning("[PlayerController] hero.tscn not found - falling back to procedural model.")
-	# Fallback: procedural model.
+			var inst: Node = hero_scene.instantiate()
+			var hero_root := inst as Node3D
+			if hero_root != null and _hero_is_drawable(hero_root):
+				hero_root.name = "Model"
+				add_child(hero_root)
+				_hero = hero_root
+				_anim_player = _hero.get_node_or_null("AnimationPlayer") as AnimationPlayer
+				_using_imported_hero = true
+				print("[PlayerController] hero.tscn attached (meshes=%d, bones=%d, %.2f m tall)" % [
+					_count_visible_meshes(_hero), _count_bones(_hero), _hero_height(_hero)])
+				return
+			push_warning("[PlayerController] hero.tscn is empty or not drawable - using the procedural runner instead.")
+			if inst != null:
+				inst.queue_free()
+	push_warning("[PlayerController] No usable hero scene - falling back to the procedural runner.")
+	# Fallback: procedural model (guaranteed to be visible on every GPU).
 	_model = RunnerModel.new()
 	_model.name = "Model"
 	add_child(_model)
 	_using_imported_hero = false
+
+
+## A scene is only worth drawing if it contains at least one visible mesh with
+## real surfaces, a skeleton and a plausible height. This check is the last line
+## of defence: an empty/broken hero can never make the runner invisible again.
+func _hero_is_drawable(root: Node3D) -> bool:
+	return _count_visible_meshes(root) > 0 and _count_bones(root) > 0 and _hero_height(root) >= 0.4
+
+
+func _count_visible_meshes(root: Node) -> int:
+	var count := 0
+	for n in root.find_children("*", "MeshInstance3D", true, false):
+		var mi := n as MeshInstance3D
+		if mi != null and mi.visible and mi.mesh != null and mi.mesh.get_surface_count() > 0:
+			count += 1
+	return count
+
+
+func _count_bones(root: Node) -> int:
+	for n in root.find_children("*", "Skeleton3D", true, false):
+		return (n as Skeleton3D).get_bone_count()
+	return 0
+
+
+## Height of the visible meshes in `root` space. Walks the parent chain manually
+## because this runs before the node is added to the scene tree.
+func _hero_height(root: Node3D) -> float:
+	var box := AABB()
+	var first := true
+	for n in root.find_children("*", "MeshInstance3D", true, false):
+		var mi := n as MeshInstance3D
+		if mi == null or not mi.visible or mi.mesh == null or mi.mesh.get_surface_count() <= 0:
+			continue
+		var chain: Array[Transform3D] = []
+		var node: Node = mi
+		var guard := 0
+		while node != null and node != root and guard < 256:
+			if node is Node3D:
+				chain.push_front((node as Node3D).transform)
+			node = node.get_parent()
+			guard += 1
+		var xf := Transform3D()
+		for t in chain:
+			xf = xf * t
+		var b: AABB = xf * mi.get_aabb()
+		box = b if first else box.merge(b)
+		first = false
+	return box.size.y if not first else 0.0
 
 
 func _attach_animation_handler() -> void:
@@ -196,13 +243,10 @@ func reset() -> void:
 	if _model:
 		_model.set_state(RunnerModel.State.RUN)
 		_model.reset_pose()
-	if _using_imported_hero and _anim_player:
-		if _anim_player.has_animation("idle"):
-			_anim_player.play("idle")
-		elif _anim_player.has_animation("jog"):
-			_anim_player.play("jog")
-	if _anim_tree:
-		_reset_tree_oneshots()
+	# The handler owns playback: never call AnimationPlayer.play() here, or the
+	# reset would fight the locomotion cross-fade on the same skeleton.
+	if _using_imported_hero:
+		_reset_animation_state()
 	if _blob:
 		_blob.visible = true
 	if Settings.tilt_enabled:
@@ -284,10 +328,11 @@ func _physics_process(delta: float) -> void:
 	run_blend = move_toward(run_blend, clampf((spd - 9.0) / 18.0, 0.0, 1.0), delta * 2.8)
 	if _model:
 		_model.animate(delta, spd, is_sliding, is_airborne)
-	# Drive the imported AnimationTree.
-	if _anim_tree:
-		_drive_anim_tree(delta, spd)
-	elif _anim_handler and _anim_handler.has_method("tick"):
+	# Drive the imported hero: the handler owns the AnimationPlayer (there is
+	# deliberately no AnimationTree — see player_animation_handler.gd).
+	if _anim_handler and _anim_handler.has_method("set_run_blend"):
+		_anim_handler.set_run_blend(run_blend)
+	if _anim_handler and _anim_handler.has_method("tick"):
 		_anim_handler.tick(delta, is_sliding, is_airborne, is_stumbling)
 	var intensity := clampf((spd - 11.0) / 16.0, 0.0, 1.0)
 	if absf(intensity - _last_intensity) > 0.025:
@@ -295,27 +340,39 @@ func _physics_process(delta: float) -> void:
 		action_intensity_changed.emit(intensity)
 
 
-func _drive_anim_tree(_delta: float, _speed: float) -> void:
-	if _anim_tree == null:
-		return
-	# The AnimationTree root is an AnimationNodeStateMachine whose "locomotion"
-	# state embeds a BlendTree. The BlendSpace1D for speed is also named
-	# "locomotion" and the lane-lean Blend2 is named "lean" – these names come
-	# from ImportArabicFolderHero.gd when it builds hero.tscn.
-	_set_param_safe("parameters/locomotion/locomotion/blend_position", run_blend)
-	_set_param_safe("parameters/locomotion/lean/amount",
-		clampf(lane_blend * 0.5, -1.0, 1.0))
-	if _anim_handler and _anim_handler.has_method("tick"):
-		_anim_handler.tick(_delta, is_sliding, is_airborne, is_stumbling)
+## Compact description of the visual rig, used by the CI screenshot session.
+## It is the runtime truth: the screenshots only prove what this says is drawn.
+func animation_debug() -> String:
+	var lines := PackedStringArray()
+	lines.append("using_imported_hero=%s" % _using_imported_hero)
+	var model := get_node_or_null("Model")
+	lines.append("model=%s" % (String(model.name) if model != null else "<none>"))
+	if model != null:
+		var kids := PackedStringArray()
+		for c in model.get_children():
+			kids.append(String(c.name))
+		lines.append("model_children=%s" % ", ".join(kids))
+	if _anim_player != null:
+		lines.append("anim_player clip='%s' playing=%s t=%.3f speed=%.2f" % [
+			String(_anim_player.current_animation), _anim_player.is_playing(),
+			_anim_player.get_current_animation_position(), _anim_player.speed_scale])
+	if _anim_handler != null and _anim_handler.has_method("debug_state"):
+		lines.append(String(_anim_handler.call("debug_state")))
+	var skel: Skeleton3D = null
+	if model != null:
+		for node in model.find_children("*", "Skeleton3D", true, false):
+			skel = node as Skeleton3D
+			break
+	if skel != null:
+		lines.append("bones=%d" % skel.get_bone_count())
+		var poses := PackedStringArray()
+		for i in range(mini(3, skel.get_bone_count())):
+			poses.append("%s=%s" % [skel.get_bone_name(i), skel.get_bone_pose_rotation(i)])
+		lines.append("bone_pose[0..2] %s" % ", ".join(poses))
+	return "\n".join(lines)
 
 
-func _set_param_safe(path: String, value: float) -> void:
-	if _anim_tree == null:
-		return
-	_anim_tree.set(path, value)
-
-
-func _reset_tree_oneshots() -> void:
+func _reset_animation_state() -> void:
 	if _anim_handler and _anim_handler.has_method("fire"):
 		_anim_handler.fire("recover")
 
@@ -323,10 +380,6 @@ func _reset_tree_oneshots() -> void:
 func _fire_anim(name: String) -> void:
 	if _anim_handler and _anim_handler.has_method("fire"):
 		_anim_handler.fire(name)
-	if _anim_tree:
-		var path := "parameters/%s/active" % name
-		if _anim_tree.has_node(path):
-			_anim_tree.set(path, true)
 	elif _anim_player and _anim_player.has_animation(name):
 		_anim_player.play(name)
 

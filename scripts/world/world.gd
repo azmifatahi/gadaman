@@ -241,6 +241,7 @@ func _run_screenshot_session() -> void:
 	_on_play_requested()
 	await get_tree().create_timer(2.2).timeout
 	await _save_shot("03_gameplay")
+	_dump_animation_state()
 	player.jump()
 	await get_tree().create_timer(0.34).timeout
 	await _save_shot("04_jump")
@@ -263,6 +264,18 @@ func _run_screenshot_session() -> void:
 	Game.to_menu()
 	print("SCREENSHOTS_DONE")
 	get_tree().quit()
+
+
+## Writes the live rig state next to the screenshots so CI can publish it.
+func _dump_animation_state() -> void:
+	if player == null or not player.has_method("animation_debug"):
+		return
+	var f := FileAccess.open("user://hero_state.txt", FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(String(player.call("animation_debug")))
+	f.close()
+	print("HERO_STATE_DUMPED")
 
 
 func _save_shot(shot_name: String) -> void:

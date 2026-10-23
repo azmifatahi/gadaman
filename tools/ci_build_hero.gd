@@ -11,11 +11,15 @@ extends SceneTree
 
 
 func _initialize() -> void:
-	var strict: bool = "--strict" in OS.get_cmdline_args()
+	# `--strict` may arrive before or after the `--` separator depending on how
+	# the workflow invokes us, so accept both forms.
+	var strict: bool = "--strict" in OS.get_cmdline_args() \
+		or "--strict" in OS.get_cmdline_user_args()
 	print("[CIBuildHero] starting (strict=%s)" % strict)
 	var ok: bool = HeroBuilder.build_hero(strict)
 	if not ok:
-		printerr("[CIBuildHero] FAILED")
+		var report: Dictionary = HeroBuilder.verify()
+		printerr("[CIBuildHero] FAILED: %s" % JSON.stringify(report, "  "))
 		quit(1 if strict else 0)
 		return
 	print("[CIBuildHero] OK -> %s" % HeroBuilder.HERO_SCENE_PATH)

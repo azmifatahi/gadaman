@@ -300,15 +300,71 @@ meshes without rewriting the runner.
 3. Create clips named `jog`, `sprint`, `ultra_sprint`, `lane_left`, `lane_right`,
    `jump`, `fall`, `land`, `slide`, `hurdle`, `chest_bump`, `stumble`, `recover`,
    and `crash`. Enable looping only on the three locomotion clips.
-4. In an `AnimationTree`, use a 1D locomotion BlendSpace at 0/0.55/1 and a
-   separate additive lane BlendSpace at -1/0/1. Drive them from
-   `PlayerController.run_blend` and `lane_blend`. One-shot nodes own jump,
-   landing, slide, hurdle, bump and recovery. Root motion should be disabled in
-   Z because the track scrolls; lateral/root rotation may be consumed visually.
+4. **No `AnimationTree` is required (and none is generated).** The runtime
+   driver (`scripts/player/player_animation_handler.gd`) plays clips straight on
+   the `AnimationPlayer`: locomotion cross-fades idle → jog → sprint from
+   `PlayerController.run_blend`, one-shots own jump/fall/land/slide/stumble and
+   hand control back when they finish. Root motion is disabled in Z because the
+   track scrolls. An `AnimationTree` whose resource graph fails to survive
+   `PackedScene.pack()` silently outranks the `AnimationPlayer` and freezes the
+   skeleton — that was v1.2.2's T-pose, so the tree was removed rather than
+   patched.
 5. Keep the generated `RunnerModel` as the low-tier LOD. Use the imported skinned
    hero for medium/high, and create 35k / 15k / 4k triangle LODs with transition
    distances around 14 m and 32 m. All variants must share the same silhouette
    and animation names.
+
+### Generated hero scene (`assets/models/hero/hero.tscn`)
+
+`HeroBuilder` (scripts/tools/hero_builder.gd) is the only consumer of the
+character folder. It runs headless in CI (tools/ci_build_hero.gd) and from the
+editor (scripts/tools/ImportArabicFolderHero.gd); the game itself never touches
+FBX at runtime because exported builds do not ship the source files.
+
+Pipeline invariants:
+
+1. **Content-based skin selection.** Each candidate is instantiated and its
+   real mesh vertex count is measured; the richest file is the skin. File
+   names, file sizes and byte sniffing are not used (in an APK the `.fbx`
+   sources report size 0, which previously selected a motion-only clip and
+   produced a hero without geometry).
+2. **Track retargeting.** Every animation track is rewritten onto
+   `Mesh/<skeleton path>:<bone>` by normalised bone name
+   (`mixamorig:Hips`, `mixamorig_Hips` and `Hips` are equivalent). Motion-only
+   Mixamo exports store bone motion as plain `Node3D` tracks; those are mapped
+   onto bones as well, and hip X/Z translation is pinned so the runner cannot
+   drift out of its collision box.
+3. **Normalised presentation.** Uniform scale to 1.78 m, feet on Y=0, centred
+   on X/Z and yawed so the character faces -Z (away from the chase camera).
+   Bounds are computed by walking local transforms because
+   `Node3D.global_transform` is invalid outside the SceneTree.
+4. **Ownership before packing.** `PackedScene.pack()` drops any node whose
+   `owner` is not the packed root (`SceneState::_parse_node()` returns early and
+   skips the whole subtree). The builder assigns `owner` recursively, which is
+   what makes the skeleton, skinned mesh and materials end up in the saved
+   scene at all.
+5. **Self-verification.** The builder re-loads the file it just wrote and
+   `HeroBuilder.verify()` asserts: >= 1 visible mesh with surfaces, >= 200
+   vertices, height within 1.2-2.4 m, feet within +/-0.2 m of the ground, a
+   skeleton with >= 10 bones and a non-collapsed rest pose, and every required
+   clip (jog/jump/fall/land/slide/stumble) having at least one track that
+   resolves inside the scene. It then **plays** each clip and counts how many
+   bones actually change pose, because resolvable tracks are not the same thing
+   as movement. `tools/ci_hero_probe.gd` repeats that test in a live SceneTree
+   through the real runtime handler, and CI refuses to export an APK when either
+   check fails.
+6. **Motion-based take selection.** A Mixamo FBX usually contains two
+   animation stacks: `mixamo.com` (the real motion) and `Take 001` (a full-length
+   static copy of the bind pose). The builder scores each stack by how much its
+   keys vary and keeps the one that actually moves; picking on track count alone
+   selects the static take and ships a T-posed runner.
+7. **Runtime fallback.** `PlayerController._hero_is_drawable()` repeats the
+   cheap part of that check on the loaded scene and falls back to the
+   procedural `RunnerModel` instead of rendering nothing.
+
+Suit material: `scripts/player/hero_material.gd`. It is deliberately dielectric
+(metallic 0.05) — with the Compatibility renderer and reflections disabled a
+metallic suit renders black.
 
 ### Environment and lighting
 

@@ -1,0 +1,24 @@
+== AnimationPlayer block ==
+3739:[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+3740-libraries = {
+3741-&"": SubResource("AnimationLibrary_5ego8")
+3742-}
+== AnimationTree nodes (should be none) ==
+== first clip tracks ==
+468:tracks/0/path = NodePath("Mesh/Skeleton3D:mixamorig_Hips")
+475:tracks/1/path = NodePath("Mesh/Skeleton3D:mixamorig_Hips")
+482:tracks/2/path = NodePath("Mesh/Skeleton3D:mixamorig_Spine")
+489:tracks/3/path = NodePath("Mesh/Skeleton3D:mixamorig_RightUpLeg")
+496:tracks/4/path = NodePath("Mesh/Skeleton3D:mixamorig_LeftUpLeg")
+503:tracks/5/path = NodePath("Mesh/Skeleton3D:mixamorig_Spine1")
+== sub_resources: 16
+== ext_resources ==
+3:[ext_resource type="Texture2D" path="res://assets/textures/flag.png" id="1_g6yoq"]
+4:[ext_resource type="Texture2D" path="res://assets/textures/suit_seams_normal.png" id="2_lltbv"]
+== nodes ==
+3266:[node name="Hero" type="Node3D"]
+3268:[node name="Mesh" type="Node3D" parent="."]
+3271:[node name="Skeleton3D" type="Skeleton3D" parent="Mesh"]
+3728:[node name="Beta_Surface" type="MeshInstance3D" parent="Mesh/Skeleton3D"]
+3733:[node name="Beta_Joints" type="MeshInstance3D" parent="Mesh/Skeleton3D"]
+3739:[node name="AnimationPlayer" type="AnimationPlayer" parent="."]

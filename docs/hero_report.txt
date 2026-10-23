@@ -1,0 +1,78 @@
+{
+  "bone_span": 1.819669008255,
+  "bones": 65,
+  "clips": {
+    "fall": 43,
+    "jog": 53,
+    "jump": 53,
+    "land": 43,
+    "slide": 43,
+    "stumble": 53
+  },
+  "feet": 0.0000000000582076609134674,
+  "height": 1.78000378608704,
+  "meshes": 2,
+  "motion": {
+    "fall": {
+      "bones": 65,
+      "length": 1.06666994094849,
+      "moved": 39,
+      "playable": true,
+      "tracks": 43
+    },
+    "idle": {
+      "bones": 65,
+      "length": 1.0,
+      "moved": 0,
+      "playable": true,
+      "tracks": 53
+    },
+    "jog": {
+      "bones": 65,
+      "length": 0.583333015441895,
+      "moved": 20,
+      "playable": true,
+      "tracks": 53
+    },
+    "jump": {
+      "bones": 65,
+      "length": 0.866666972637177,
+      "moved": 22,
+      "playable": true,
+      "tracks": 53
+    },
+    "land": {
+      "bones": 65,
+      "length": 1.06666994094849,
+      "moved": 39,
+      "playable": true,
+      "tracks": 43
+    },
+    "slide": {
+      "bones": 65,
+      "length": 1.53332996368408,
+      "moved": 42,
+      "playable": true,
+      "tracks": 43
+    },
+    "sprint": {
+      "bones": 65,
+      "length": 0.364582985639572,
+      "moved": 20,
+      "playable": true,
+      "tracks": 53
+    },
+    "stumble": {
+      "bones": 65,
+      "length": 1.16666996479034,
+      "moved": 51,
+      "playable": true,
+      "tracks": 53
+    }
+  },
+  "ok": true,
+  "path": "res://assets/models/hero/hero.tscn",
+  "problems": [],
+  "vertices": 28374,
+  "warnings": []
+}

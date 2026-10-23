@@ -68,11 +68,57 @@ jobs:
       - name: Build hero scene from Arabic FBX folder (headless)
         timeout-minutes: 5
         run: |
-          # Validate job is relaxed – if for some reason the FBX didn't
-          # import, the smoke test will still run and we'll see it on the
-          # APK job which is strict.
-          godot --headless -v --script tools/ci_build_hero.gd 2>&1 | tee hero_build.log | tail -n 80
+          set -o pipefail
+          timeout 240 godot --headless -v --script tools/ci_build_hero.gd -- --strict 2>&1 | tee hero_build.log | tail -n 120
           ls -la assets/models/hero/ 2>/dev/null || true
+          echo "--- hero_report.json ---"
+          cat assets/models/hero/hero_report.txt 2>/dev/null || true
+
+      - name: Verify hero scene is drawable (strict)
+        run: |
+          # Guards against the v1.2.x regression where hero.tscn was saved with
+          # no nodes (nodes had no owner when PackedScene.pack() ran) and the
+          # runner rendered as nothing.
+          echo "::group::hero_report.json"
+          cat assets/models/hero/hero_report.txt 2>/dev/null || true
+          echo "::endgroup::"
+          set -o pipefail
+          timeout 120 godot --headless --script tools/ci_verify_hero.gd -- --strict \
+            2>&1 | tee hero_verify.log | tail -n 60
+          grep -q "\[CIVerifyHero\] OK" hero_verify.log || {
+            echo "::error::hero.tscn failed verification (see the report above)."
+            exit 1
+          }
+
+      - name: Probe hero animation (strict)
+        run: |
+          # Data checks are not enough: this instantiates the scene in a real
+          # SceneTree and fails if the skeleton stays frozen (T-pose).
+          set -o pipefail
+          timeout 120 godot --headless --script tools/ci_hero_probe.gd -- --strict \
+            2>&1 | tee hero_probe.log | tail -n 60
+          grep -q "\[HeroProbe\] OK" hero_probe.log || {
+            echo "::error::hero.tscn does not animate (frozen skeleton)."
+            exit 1
+          }
+
+      - name: Publish hero build summary (annotations)
+        if: always()
+        run: |
+          # Surfacing the builder log as check annotations keeps the diagnostics
+          # reachable even when artifacts/log bundles are not downloadable.
+          if [ -f hero_build.log ]; then
+            grep -E "HeroBuilder|SCRIPT ERROR|Parse Error|ERROR:" hero_build.log \
+              | tail -n 30 | while IFS= read -r line; do echo "::notice::${line}"; done
+          fi
+          if [ -f assets/models/hero/hero_report.txt ]; then
+            tr -d '\n' < assets/models/hero/hero_report.txt | cut -c1-3000 \
+              | while IFS= read -r line; do echo "::notice::hero_report ${line}"; done
+          fi
+          if [ -f hero_probe.log ]; then
+            grep "\[HeroProbe\]" hero_probe.log | tail -n 40 \
+              | while IFS= read -r line; do echo "::notice::${line}"; done
+          fi
 
       - name: Headless gameplay smoke test
         run: |
@@ -112,6 +158,10 @@ jobs:
             assets/models/hero/
             .godot/
           if-no-files-found: error
+          # .godot is a dot-directory: without this it is silently dropped and
+          # the APK job ends up with no import cache / no script class cache
+          # (that is why its verify step could not even resolve HeroBuilder).
+          include-hidden-files: true
 
   # ---------------------------------------------------------------------------
   # 2. Export a signed (debug key) APK. Debug signing keeps the workflow usable
@@ -191,6 +241,51 @@ jobs:
             echo "::error::validate job didn't produce hero.tscn – aborting APK export."
             exit 1
           fi
+
+      - name: Import project (sidecars + script class cache)
+        run: |
+          # `.import` sidecars live next to each asset and are therefore NOT part
+          # of the uploaded `.godot` cache. Without them every texture fails with
+          # "No loader found for resource: res://assets/textures/flag.png", which
+          # is exactly how the APK job died right after the hero started using
+          # real materials. Importing is idempotent (~40 s) and also rebuilds the
+          # script class cache the strict verifier needs.
+          godot --headless --import 2>&1 | tail -n 20
+          godot --headless --import 2>&1 | tail -n 5
+          test -f .godot/global_script_class_cache.cfg || { echo "::error::script class cache missing after import"; exit 1; }
+          test -f assets/textures/flag.png.import || { echo "::error::texture import sidecars missing"; exit 1; }
+
+      - name: Verify restored hero scene (strict)
+        run: |
+          echo "::group::hero_report.json"
+          cat assets/models/hero/hero_report.txt 2>/dev/null || true
+          echo "::endgroup::"
+          set -o pipefail
+          timeout 120 godot --headless --script tools/ci_verify_hero.gd -- --strict \
+            2>&1 | tee hero_verify_apk.log | tail -n 60
+          grep -q "\[CIVerifyHero\] OK" hero_verify_apk.log || {
+            echo "::error::Restored hero.tscn is not drawable – refusing to export an APK with an invisible runner."
+            exit 1
+          }
+
+      - name: Publish hero diagnostics (annotations)
+        if: always()
+        run: |
+          # Check annotations are reachable through the GitHub API even when
+          # log bundles and artifacts cannot be downloaded.
+          emit() { echo "::notice title=hero::$(printf '%s' "$1" | tr '\n' '|' | cut -c1-900)"; }
+          emit "hero_dir: $(ls -la assets/models/hero/ 2>&1 | tr '\n' '|')"
+          emit "godot_dir: $(ls .godot 2>&1 | tr '\n' ' ') user=$(whoami)"
+          if [ -f assets/models/hero/hero.tscn ]; then
+            emit "hero_head: $(head -c 400 assets/models/hero/hero.tscn | tr '\n' '|')"
+            emit "hero_size: $(stat -c %s assets/models/hero/hero.tscn)"
+            emit "hero_nodes: $(grep -c '^\[node' assets/models/hero/hero.tscn)"
+          fi
+          for f in hero_verify_apk.log hero_verify.log hero_probe.log; do
+            if [ -f "$f" ]; then
+              emit "log $f: $(tail -n 40 "$f" | tr '\n' '|')"
+            fi
+          done
 
       - name: Configure Godot for Android export
         run: |
@@ -290,7 +385,8 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.capture_screenshots) ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[shots]'))
     runs-on: ubuntu-latest
-    needs: validate
+    # No `needs: validate` on purpose: this job builds + verifies the hero
+    # itself, so a red validate job must not hide the visual evidence.
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -314,6 +410,38 @@ jobs:
       - name: Import project
         run: godot --headless --import 2>&1 | tail -n 5
 
+      - name: Build + verify hero (screenshots must show the real runner)
+        run: |
+          # Without this step the screenshot job renders the procedural fallback,
+          # which is why the v1.2.x screenshots looked fine while the APK showed
+          # no character at all.
+          set -o pipefail
+          timeout 240 godot --headless --script tools/ci_build_hero.gd 2>&1 \
+            | tee hero_build.log | tail -n 60 || true
+          cat assets/models/hero/hero_report.txt 2>/dev/null || true
+          timeout 120 godot --headless --script tools/ci_verify_hero.gd 2>&1 \
+            | tee hero_verify.log | tail -n 40 || true
+          grep -E "\[CIVerifyHero\]" hero_verify.log | tail -n 5 || true
+          timeout 120 godot --headless --script tools/ci_hero_probe.gd 2>&1 \
+            | tee hero_probe.log | tail -n 40 || true
+          mkdir -p docs
+          cp assets/models/hero/hero_report.txt docs/hero_report.txt 2>/dev/null || true
+          cp hero_probe.log docs/hero_runtime.txt 2>/dev/null || true
+          # Small slice of the generated scene for debugging serialization.
+          {
+            echo "== AnimationPlayer block =="
+            grep -n -A 6 'type="AnimationPlayer"' assets/models/hero/hero.tscn | head -n 20 || true
+            echo "== AnimationTree nodes (should be none) =="
+            grep -n 'type="AnimationTree"' assets/models/hero/hero.tscn | head -n 5 || true
+            echo "== first clip tracks =="
+            grep -n 'tracks/[0-9]*/path' assets/models/hero/hero.tscn | head -n 6 || true
+            echo "== sub_resources: $(grep -c '^\[sub_resource' assets/models/hero/hero.tscn || true)"
+            echo "== ext_resources =="
+            grep -n '^\[ext_resource' assets/models/hero/hero.tscn | head -n 10 || true
+            echo "== nodes =="
+            grep -n '^\[node' assets/models/hero/hero.tscn | head -n 20 || true
+          } > docs/hero_scene.txt
+
       - name: Render screenshots
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
@@ -327,6 +455,9 @@ jobs:
           USER_DIR="$HOME/.local/share/godot/app_userdata/Sudan Runner"
           ls -la "$USER_DIR" || true
           cp "$USER_DIR"/shot_*.png docs/screenshots/ 2>/dev/null || true
+          cp "$USER_DIR"/hero_state.txt docs/hero_state.txt 2>/dev/null || true
+          echo "--- hero_state (runtime truth) ---"
+          cat docs/hero_state.txt 2>/dev/null || echo "(no hero_state.txt)"
           ls -la docs/screenshots
 
       - name: Commit screenshots to the branch
@@ -338,5 +469,21 @@ jobs:
           git config user.name "Sudan Runner CI"
           git config user.email "ci@users.noreply.github.com"
           git add docs/screenshots/*.png
+          if [ -f docs/hero_report.txt ]; then
+            git add docs/hero_report.txt
+          fi
+          if [ -f docs/hero_runtime.txt ]; then
+            git add docs/hero_runtime.txt
+          fi
+          if [ -f docs/hero_scene.txt ]; then
+            git add docs/hero_scene.txt
+          fi
+          if [ -f docs/hero_state.txt ]; then
+            git add docs/hero_state.txt
+          fi
+          if [ -f hero_build.log ]; then
+            cp hero_build.log docs/hero_build.txt
+            git add docs/hero_build.txt
+          fi
           git commit -m "docs: automated gameplay screenshots"
           git push origin "HEAD:${{ github.ref_name }}"

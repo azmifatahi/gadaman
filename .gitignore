@@ -18,6 +18,7 @@ assets/models/hero/*.tscn
 assets/models/hero/*.tres
 assets/models/hero/*.res
 !assets/models/hero/.gitkeep
+assets/models/hero/hero_report.txt
 
 # OS / editor noise
 .DS_Store
