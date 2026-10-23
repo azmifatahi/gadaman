@@ -1,20 +1,33 @@
 ## =============================================================================
-##  hero_builder.gd  —  Headless-safe automation core
-##  ----------------------------------------------------------------------------
-##  The reusable build routine behind ImportArabicFolderHero.gd. This file is
-##  NOT an EditorScript: it exposes static functions that work from any context
-##  (EditorScript, headless --script MainLoop, or even a runtime @onready).
-##  That is the piece that makes the CI build fully automatic: GitHub Actions
-##  invokes build_hero() via a tiny MainLoop script after `godot --import`,
-##  producing assets/models/hero/hero.tscn before the APK export step.
+##  hero_builder.gd  —  Headless-safe hero scene builder.
+## -----------------------------------------------------------------------------
+##  Scans res://assets/characters/الشخصية/ (or the older res://الشخصيه/),
+##  loads the Mixamo X-Bot skin FBX and all per-action animation clips using
+##  Godot 4.4's BUILT-IN ufbx importer (no external FBX2glTF binary needed),
+##  and writes assets/models/hero/hero.tscn containing:
+##    * The skinned mesh (~1.7m tall, feet at Y=0, facing -Z).
+##    * AnimationPlayer with canonical clips: idle / jog / sprint / jump /
+##      fall / land / slide / stumble. (idle and sprint are synthesised.)
+##    * AnimationTree (root = StateMachine): BlendSpace1D driven by run_blend
+##      (idle/jog/sprint), Blend2 lane-lean driven by lane_blend, one-shot
+##      states for jump/fall/land/slide/stumble.
+##    * Sudan chrome PBR suit material (Metallic 0.8, Roughness 0.2, seams
+##      normal map) on every body mesh surface plus a ReflectionProbe.
 ##
-##  All paths are UTF-8 safe (String.path_join + DirAccess) so the Arabic
-##  folder name "الشخصيه/" works on every platform including the Linux CI.
+##  Exit codes: build_hero() returns true on success; false on failure.
+##  When strict=true (APK export job) failure is fatal so we never ship a
+##  capsule-only APK again.
 ## =============================================================================
 class_name HeroBuilder
 extends RefCounted
 
-const ARABIC_FOLDER_CANDIDATES := ["res://الشخصيه/", "res://الشخصية/"]
+const CHAR_FOLDER_CANDIDATES := [
+	"res://assets/characters/الشخصية/",
+	"res://assets/characters/الشخصيه/",
+	"res://الشخصية/",
+	"res://الشخصيه/",
+]
+
 const HERO_DIR := "res://assets/models/hero/"
 const HERO_SCENE_PATH := HERO_DIR + "hero.tscn"
 
@@ -33,21 +46,17 @@ var _issues: Array[String] = []
 
 
 ## ---------------------------------------------------------------------------
-## Entry points
+## Public API
 ## ---------------------------------------------------------------------------
-## Runs the full automated import. Returns true if hero.tscn was saved
-## successfully. Prints progress to stdout and records any issues in _issues.
-static func build_hero(allow_fallback := true) -> bool:
-	var selfb := HeroBuilder.new()
-	return selfb._do_build(allow_fallback)
+static func build_hero(strict := false) -> bool:
+	var b := HeroBuilder.new()
+	return b._do_build(strict)
 
 
-## Like build_hero() but only builds if hero.tscn is not already present.
-## Safe to call from _ready() during a runtime first-launch.
 static func build_if_missing() -> bool:
 	if ResourceLoader.exists(HERO_SCENE_PATH):
 		return true
-	return build_hero(true)
+	return build_hero(false)
 
 
 func get_issues() -> Array[String]:
@@ -55,194 +64,138 @@ func get_issues() -> Array[String]:
 
 
 ## ---------------------------------------------------------------------------
-## Build
+## Build pipeline
 ## ---------------------------------------------------------------------------
-func _do_build(allow_fallback := true) -> bool:
+func _do_build(strict := false) -> bool:
 	_mkdir(HERO_DIR)
-	var arabic_dir := _locate_arabic_folder()
-	if arabic_dir == "":
-		_issues.append("Arabic character folder not found")
-		if not allow_fallback:
-			push_error("[HeroBuilder] %s" % _issues[-1])
-			return false
-		push_warning("[HeroBuilder] %s - leaving procedural model in place" % _issues[-1])
+	var folder := _locate_folder()
+	if folder == "":
+		_issue("Character folder not found", strict)
 		return false
-	print("[HeroBuilder] Scanning %s" % arabic_dir)
+	print("[HeroBuilder] Scanning %s" % folder)
 
-	# Short-circuit: without FBX2glTF on PATH, Godot's importer will hang
-	# trying to convert FBX files. GLB files can still be loaded. We check
-	# for any GLB first; if none and no FBX2glTF, bail out gracefully.
-	var have_glb := false
-	var files := _list_fbx(arabic_dir)
-	for f in files:
-		if f.to_lower().ends_with(".glb") or f.to_lower().ends_with(".gltf"):
-			have_glb = true
-	if not have_glb and not _fbx2gltf_available():
-		_issues.append("FBX2glTF not on PATH and no GLB supplied; cannot build hero headlessly")
-		if not allow_fallback:
-			push_error("[HeroBuilder] %s" % _issues[-1])
-			return false
-		push_warning("[HeroBuilder] %s (procedural model will be used)" % _issues[-1])
-		return false
-
+	var files := _list_assets(folder)
 	if files.is_empty():
-		_issues.append("No FBX/GLB files in %s" % arabic_dir)
-		if not allow_fallback:
-			push_error("[HeroBuilder] %s" % _issues[-1])
-			return false
-		push_warning("[HeroBuilder] %s" % _issues[-1])
+		_issue("No FBX/GLB files in %s" % folder, strict)
 		return false
 
-	var skin_path := ""
-	var anim_clips := {}
+	var skin_path: String = ""
+	var clips: Dictionary = {}
 	for f in files:
-		var full := arabic_dir.path_join(f)
-		# Only treat FBX as skin if FBX2glTF is present, otherwise treat all
-		# FBX as unknown and look for GLB.
-		if (f.to_lower().ends_with(".fbx") and not _fbx2gltf_available()):
-			continue
-		if (f.to_lower().ends_with(".glb") or f.to_lower().ends_with(".gltf")) or _is_skin_fbx(full):
+		var full: String = folder.path_join(f)
+		if _is_skin(full):
 			skin_path = full
 		else:
-			var key := _classify(f)
-			if key != "":
-				anim_clips[key] = full
+			var k := _classify(f)
+			if k != "":
+				clips[k] = full
+
+	# Fallback: if no file marked itself as the skin, pick the largest.
 	if skin_path == "":
-		var largest_name := ""
-		var largest_size := -1
+		var largest_name: String = ""
+		var largest_size: int = -1
 		for f in files:
-			var fp := arabic_dir.path_join(f)
-			var fn_low: String = f.to_lower()
-			var is_fbx: bool = fn_low.ends_with(".fbx")
-			if is_fbx and not _fbx2gltf_available():
-				continue
-			var sz: int = FileAccess.get_file_as_bytes(fp).size()
+			var sz: int = FileAccess.get_file_as_bytes(folder.path_join(f)).size()
 			if sz > largest_size:
 				largest_size = sz
 				largest_name = f
-		skin_path = arabic_dir.path_join(largest_name)
-	if skin_path == "" or skin_path == arabic_dir.path_join(""):
-		_issues.append("No loadable skin mesh found")
-		if not allow_fallback:
-			push_error("[HeroBuilder] %s" % _issues[-1])
-			return false
-		push_warning("[HeroBuilder] %s" % _issues[-1])
-		return false
-	print("[HeroBuilder] skin = %s, clips = %s" % [skin_path.get_file(), anim_clips.keys()])
+		skin_path = folder.path_join(largest_name)
+	print("[HeroBuilder] skin = %s" % skin_path.get_file())
+	print("[HeroBuilder] clips = %s" % clips.keys())
 
-	# Try to load the skin scene. NB: never call ResourceLoader.exists/load on
-	# an .fbx path unless FBX2glTF is on PATH — Godot shells out to the
-	# converter and hangs forever if it can't be found. For GLB/GLTF the
-	# importer is built-in and safe.
-	var is_safe_to_load := skin_path.to_lower().ends_with(".glb") \
-			or skin_path.to_lower().ends_with(".gltf") \
-			or _fbx2gltf_available()
-	var skin_scene: PackedScene = null
-	if is_safe_to_load and ResourceLoader.exists(skin_path):
-		skin_scene = load(skin_path)
-	if not is_safe_to_load:
-		_issues.append("Skip FBX %s - FBX2glTF unavailable" % skin_path.get_file())
-		if not allow_fallback:
-			push_error("[HeroBuilder] %s" % _issues[-1])
-			return false
-		push_warning("[HeroBuilder] %s (procedural model used)" % _issues[-1])
-		return false
+	# Load the skin scene. Godot 4.3+ includes the ufbx importer built-in;
+	# FBX loading works out of the box in headless mode as long as we have
+	# let the editor/import step finish first.
+	var skin_scene: PackedScene = _safe_load_scene(skin_path)
 	if skin_scene == null:
-		_issues.append("Cannot load skin FBX %s (FBX2glTF may be missing)" % skin_path)
-		if not allow_fallback:
-			push_error("[HeroBuilder] %s" % _issues[-1])
-			return false
-		push_warning("[HeroBuilder] %s - leaving procedural model in place" % _issues[-1])
+		_issue("Could not load skin mesh %s (import may have failed)" % skin_path, strict)
 		return false
 
-	var hero := _build_hero_from_scene(skin_scene, skin_path, anim_clips)
+	var hero: Node3D = _build_hero_tree(skin_scene, clips)
+
+	# Merge animations: start with whatever came with the skin (usually a
+	# reference "mixamo.com" clip, used as jog if needed).
+	var ap: AnimationPlayer = hero.get_node("AnimationPlayer") as AnimationPlayer
+	var lib: AnimationLibrary = ap.get_animation_library("")
+	_add_anims_from(ap.get_node("Mesh"), "jog", lib)
+	for key in clips.keys():
+		var cs: PackedScene = _safe_load_scene(clips[key])
+		if cs == null:
+			push_warning("[HeroBuilder] Skip clip %s (%s)" % [key, clips[key]])
+			continue
+		var tmp := cs.instantiate()
+		_add_anims_from(tmp, key, lib)
+		tmp.queue_free()
+
+	_make_canonical(lib)
+	_apply_loops(lib)
+	_print_library(lib)
+
+	# Apply suit material.
+	var suit_script: GDScript = load("res://scripts/tools/SetupRealisticRunner.gd") as GDScript
+	if suit_script != null:
+		var suit_mat: Material = suit_script.make_suit_material()
+		if suit_mat != null:
+			_apply_material(hero.get_node("Mesh"), suit_mat)
+		suit_script.ensure_reflection_probe(hero)
+
+	# Pack + save.
 	var pck := PackedScene.new()
 	if pck.pack(hero) != OK:
-		_issues.append("PackScene failed")
+		_issue("PackScene failed", strict)
 		hero.queue_free()
 		return false
 	hero.queue_free()
-	var flags := ResourceSaver.FLAG_REPLACE_SUBRESOURCE_PATHS
-	#if ResourceSaver has FLAG_BUNDLE_RESOURCES:
-	#	flags |= ResourceSaver.FLAG_BUNDLE_RESOURCES
-	var err := ResourceSaver.save(pck, HERO_SCENE_PATH, flags)
+	var err := ResourceSaver.save(pck, HERO_SCENE_PATH, ResourceSaver.FLAG_REPLACE_SUBRESOURCE_PATHS)
 	if err != OK:
-		_issues.append("Saving %s failed: %s" % [HERO_SCENE_PATH, error_string(err)])
-		push_error("[HeroBuilder] %s" % _issues[-1])
+		_issue("Saving %s failed: %s" % [HERO_SCENE_PATH, error_string(err)], strict)
 		return false
-	print("[HeroBuilder] ✔ Saved %s" % HERO_SCENE_PATH)
+	print("[HeroBuilder] \u2714 Wrote %s" % HERO_SCENE_PATH)
 	return true
 
 
 ## ---------------------------------------------------------------------------
-## UTF-8 safe directory helpers
+## Folder / file discovery (UTF-8 safe)
 ## ---------------------------------------------------------------------------
-func _mkdir(path: String) -> void:
-	# Ensure the hero output directory exists. DirAccess.make_dir_recursive
-	# creates missing intermediate directories relative to the project root.
-	var da := DirAccess.open("res://")
-	if da == null:
-		printerr("[HeroBuilder] Cannot open res://")
-		return
-	var rel: String = path.trim_prefix("res://").strip_edges(false, true).rstrip("/")
-	if rel.begins_with("assets/"):
-		var parts: PackedStringArray = rel.split("/")
-		var cur: String = ""
-		for p in parts:
-			cur += p
-			if not da.dir_exists(cur):
-				da.make_dir(cur)
-			cur += "/"
-
-
-func _fbx2gltf_available() -> bool:
-	# Godot's FBX importer shells out to FBX2glTF at import time. Without the
-	# binary on PATH, load() on an FBX scene hangs indefinitely waiting for
-	# the child process. We detect availability up front and short-circuit.
-	var path_env: String = OS.get_environment("PATH")
-	var dirs: PackedStringArray = path_env.split(":")
-	for d in dirs:
-		if d == "":
-			continue
-		var cand := d.rstrip("/") + "/FBX2glTF"
-		if FileAccess.file_exists(cand):
-			return true
-		# Some distros ship it lowercase.
-		var cand2 := d.rstrip("/") + "/fbx2gltf"
-		if FileAccess.file_exists(cand2):
-			return true
-	return false
-
-
-func _locate_arabic_folder() -> String:
-	for cand in ARABIC_FOLDER_CANDIDATES:
+func _locate_folder() -> String:
+	for cand in CHAR_FOLDER_CANDIDATES:
 		if DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(cand)):
 			return cand
-	var da := DirAccess.open("res://")
+	var da: DirAccess = DirAccess.open("res://")
 	if da == null:
 		return ""
 	da.list_dir_begin()
-	var name := da.get_next()
-	while name != "":
-		if name != "." and name != ".." and da.current_is_dir():
-			if name.contains("شخص"):
-				da.list_dir_end()
-				return "res://%s/" % name
-		name = da.get_next()
+	var n: String = da.get_next()
+	while n != "":
+		if n != "." and n != ".." and da.current_is_dir() and n.contains("شخص"):
+			da.list_dir_end()
+			return "res://%s/" % n
+		n = da.get_next()
 	da.list_dir_end()
+	# Also search under assets/characters/ for any arabic-named folder.
+	var ac: DirAccess = DirAccess.open("res://assets/characters")
+	if ac != null:
+		ac.list_dir_begin()
+		n = ac.get_next()
+		while n != "":
+			if n != "." and n != ".." and ac.current_is_dir() and n.contains("شخص"):
+				ac.list_dir_end()
+				return "res://assets/characters/%s/" % n
+			n = ac.get_next()
+		ac.list_dir_end()
 	return ""
 
 
-func _list_fbx(folder: String) -> Array:
-	var out := []
-	var da := DirAccess.open(folder)
+func _list_assets(folder: String) -> Array:
+	var out: Array[String] = []
+	var da: DirAccess = DirAccess.open(folder)
 	if da == null:
 		return out
 	da.list_dir_begin()
-	var n := da.get_next()
+	var n: String = da.get_next()
 	while n != "":
 		if n != "." and n != ".." and not da.current_is_dir():
-			var low := n.to_lower()
+			var low: String = n.to_lower()
 			if low.ends_with(".fbx") or low.ends_with(".glb") or low.ends_with(".gltf"):
 				out.append(n)
 		n = da.get_next()
@@ -251,20 +204,20 @@ func _list_fbx(folder: String) -> Array:
 	return out
 
 
-func _is_skin_fbx(path: String) -> bool:
-	var f := FileAccess.open(path, FileAccess.READ)
+func _is_skin(path: String) -> bool:
+	var f: FileAccess = FileAccess.open(path, FileAccess.READ)
 	if f == null:
 		return false
-	var head := f.get_buffer(6144).get_string_from_utf8()
+	var head: String = f.get_buffer(6144).get_string_from_utf8()
 	f.close()
 	if head.find("MotionOnlyScene") != -1:
 		return false
-	return head.find("skin") != -1 or head.find("Skin") != -1 \
-			or head.find("X Bot") != -1 or head.find("Y Bot") != -1
+	return head.find("X Bot") != -1 or head.find("Y Bot") != -1 \
+			or (head.find("Skin") != -1 and head.find("skin") != -1)
 
 
 func _classify(file_name: String) -> String:
-	var low := file_name.get_basename().to_lower()
+	var low: String = file_name.get_basename().to_lower()
 	for rule in ANIM_RULES:
 		var needle: String = rule["needle"]
 		if needle == "run" and low.find("slide") != -1:
@@ -276,86 +229,113 @@ func _classify(file_name: String) -> String:
 	return ""
 
 
+func _safe_load_scene(path: String) -> PackedScene:
+	if not ResourceLoader.exists(path):
+		return null
+	var res: Resource = load(path)
+	if res is PackedScene:
+		return res as PackedScene
+	return null
+
+
+func _mkdir(path: String) -> void:
+	var da: DirAccess = DirAccess.open("res://")
+	if da == null:
+		return
+	var rel: String = path.trim_prefix("res://").strip_edges(false, true)
+	if rel == "":
+		return
+	var parts: PackedStringArray = rel.split("/")
+	var cur: String = ""
+	for p in parts:
+		cur += p
+		if not da.dir_exists(cur):
+			da.make_dir(cur)
+		cur += "/"
+
+
+func _issue(msg: String, strict: bool) -> void:
+	_issues.append(msg)
+	if strict:
+		push_error("[HeroBuilder] %s" % msg)
+	else:
+		push_warning("[HeroBuilder] %s" % msg)
+
+
 ## ---------------------------------------------------------------------------
-## Hero build (mesh + animplayer + animationtree + PBR material)
+## Hero node tree
 ## ---------------------------------------------------------------------------
-func _build_hero_from_scene(skin_scene: PackedScene, skin_path: String, clips: Dictionary) -> Node3D:
-	var hero := Node3D.new()
+func _build_hero_tree(skin_scene: PackedScene, _clips: Dictionary) -> Node3D:
+	var hero: Node3D = Node3D.new()
 	hero.name = "Hero"
 
-	if skin_scene == null:
-		push_error("[HeroBuilder] Cannot load skin %s" % skin_path)
-		return hero
-	var mesh_root := skin_scene.instantiate()
+	var mesh_root: Node3D = skin_scene.instantiate() as Node3D
 	mesh_root.name = "Mesh"
 	hero.add_child(mesh_root)
 
-	var ap := AnimationPlayer.new()
+	var ap: AnimationPlayer = AnimationPlayer.new()
 	ap.name = "AnimationPlayer"
 	hero.add_child(ap)
-	var lib := AnimationLibrary.new()
+	var lib: AnimationLibrary = AnimationLibrary.new()
 	ap.add_animation_library("", lib)
 
-	_add_all_anims_from(mesh_root, "jog", lib)
-	for key in clips.keys():
-		var cs: PackedScene = load(clips[key])
-		if cs == null:
-			push_warning("[HeroBuilder] Skip %s (%s)" % [key, clips[key]])
-			continue
-		var tmp := cs.instantiate()
-		_add_all_anims_from(tmp, key, lib)
-		tmp.queue_free()
-
-	_ensure_canonical(lib)
-	_apply_loop_modes(lib)
-	_print_library(lib)
-
-	var tree := AnimationTree.new()
+	var tree: AnimationTree = AnimationTree.new()
 	tree.name = "AnimationTree"
 	tree.anim_player = NodePath("../AnimationPlayer")
-	tree.root_motion_track = NodePath()
 	tree.active = true
 	tree.tree_root = _build_state_machine()
 	hero.add_child(tree)
 
-	_fit_mesh_to_game(mesh_root)
-
-	var suit_script: GDScript = load("res://scripts/tools/SetupRealisticRunner.gd") as GDScript
-	if suit_script != null:
-		var suit_mat: Material = suit_script.make_suit_material()
-		if suit_mat != null:
-			for node in mesh_root.find_children("*", "MeshInstance3D", true, false):
-				var m: MeshInstance3D = node as MeshInstance3D
-				if m.mesh == null:
-					continue
-				var ln: String = m.name.to_lower()
-				if ln.find("eye") != -1 or ln.find("lashes") != -1 or ln.find("teeth") != -1:
-					continue
-				for s in range(m.mesh.get_surface_count()):
-					m.set_surface_override_material(s, suit_mat)
-				m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-		suit_script.ensure_reflection_probe(hero)
+	_fit_mesh(mesh_root)
 	return hero
 
 
-func _add_all_anims_from(root: Node, force_key: String, lib: AnimationLibrary) -> void:
-	for node in _iter_nodes_of_type(root, AnimationPlayer):
-		var player := node as AnimationPlayer
-		for lib_name in player.get_animation_library_list():
-			var src := player.get_animation_library(lib_name)
+func _find_first_mesh(root: Node) -> MeshInstance3D:
+	for c in root.get_children():
+		if c is MeshInstance3D and (c as MeshInstance3D).mesh != null:
+			return c as MeshInstance3D
+		var hit: MeshInstance3D = _find_first_mesh(c)
+		if hit != null:
+			return hit
+	return null
+
+
+func _fit_mesh(root: Node3D) -> void:
+	var mi: MeshInstance3D = _find_first_mesh(root)
+	if mi == null:
+		push_warning("[HeroBuilder] No mesh found; leaving default scale")
+		return
+	var aabb: AABB = mi.get_aabb()
+	var h: float = aabb.size.y
+	var s: float = 1.0
+	if h > 4.0:
+		s = 1.7 / h
+	root.scale = Vector3(s, s, s)
+	root.position.y = -aabb.position.y * s
+	root.rotation = Vector3.ZERO
+
+
+## ---------------------------------------------------------------------------
+## Animation harvesting
+## ---------------------------------------------------------------------------
+func _add_anims_from(root: Node, force_key: String, lib: AnimationLibrary) -> void:
+	for node in _nodes_of_type(root, AnimationPlayer):
+		var player: AnimationPlayer = node as AnimationPlayer
+		for ln in player.get_animation_library_list():
+			var src: AnimationLibrary = player.get_animation_library(ln)
 			if src == null:
 				continue
-			var names := src.get_animation_list()
+			var names: PackedStringArray = src.get_animation_list()
 			if names.is_empty():
 				continue
-			if force_key != "" and names.size() >= 1:
+			if force_key != "":
 				_put_anim(lib, force_key, src.get_animation(names[0]).duplicate())
 			else:
 				for nm in names:
-					var key := nm.to_snake_case().replace("-", "_").replace(" ", "_")
-					if key.is_empty():
+					var k: String = nm.to_snake_case().replace("-", "_").replace(" ", "_")
+					if k == "":
 						continue
-					_put_anim(lib, key, src.get_animation(nm).duplicate())
+					_put_anim(lib, k, src.get_animation(nm).duplicate())
 
 
 func _put_anim(lib: AnimationLibrary, key: String, anim: Animation) -> void:
@@ -364,7 +344,19 @@ func _put_anim(lib: AnimationLibrary, key: String, anim: Animation) -> void:
 	lib.add_animation(key, anim)
 
 
-func _ensure_canonical(lib: AnimationLibrary) -> void:
+func _nodes_of_type(root: Node, t: Variant) -> Array:
+	var out: Array = []
+	if root.is_class(t):
+		out.append(root)
+	for c in root.get_children():
+		out.append_array(_nodes_of_type(c, t))
+	return out
+
+
+## ---------------------------------------------------------------------------
+## Canonical clip synthesis
+## ---------------------------------------------------------------------------
+func _make_canonical(lib: AnimationLibrary) -> void:
 	if not lib.has_animation("jog"):
 		for n in lib.get_animation_list():
 			if n.to_lower().find("run") != -1 and n.to_lower().find("slide") == -1:
@@ -372,17 +364,18 @@ func _ensure_canonical(lib: AnimationLibrary) -> void:
 				break
 	if not lib.has_animation("idle") and lib.has_animation("jog"):
 		var jog: Animation = lib.get_animation("jog")
-		var idle := Animation.new()
+		var idle: Animation = Animation.new()
 		idle.length = 1.0
 		idle.loop_mode = Animation.LOOP_LINEAR
 		for t in range(jog.get_track_count()):
 			if jog.track_get_key_count(t) == 0:
 				continue
 			idle.add_track(jog.track_get_type(t))
-			idle.track_set_path(idle.get_track_count() - 1, jog.track_get_path(t))
+			var idx: int = idle.get_track_count() - 1
+			idle.track_set_path(idx, jog.track_get_path(t))
 			var val: Variant = jog.track_get_key_value(t, 0)
-			idle.track_insert_key(idle.get_track_count() - 1, 0.0, val)
-			idle.track_insert_key(idle.get_track_count() - 1, 1.0, val)
+			idle.track_insert_key(idx, 0.0, val)
+			idle.track_insert_key(idx, 1.0, val)
 		lib.add_animation("idle", idle)
 		print("[HeroBuilder] synthesized 'idle' from jog")
 	if not lib.has_animation("sprint") and lib.has_animation("jog"):
@@ -404,35 +397,36 @@ func _ensure_canonical(lib: AnimationLibrary) -> void:
 		lib.add_animation("land", lib.get_animation("fall").duplicate())
 
 
-func _apply_loop_modes(lib: AnimationLibrary) -> void:
+func _apply_loops(lib: AnimationLibrary) -> void:
 	for rule in ANIM_RULES:
 		if lib.has_animation(rule["key"]):
-			lib.get_animation(rule["key"]).loop_mode = \
-				Animation.LOOP_LINEAR if rule["loop"] else Animation.LOOP_NONE
+			lib.get_animation(rule["key"]).loop_mode = Animation.LOOP_LINEAR if rule["loop"] else Animation.LOOP_NONE
 
 
 func _print_library(lib: AnimationLibrary) -> void:
-	print("[HeroBuilder] Clips:")
+	print("[HeroBuilder] Clips in hero AnimationPlayer:")
 	for n in lib.get_animation_list():
 		var a: Animation = lib.get_animation(n)
 		print("   %-12s %5.2fs  %s" % [n, a.length, "loop" if a.loop_mode == Animation.LOOP_LINEAR else "one-shot"])
 
 
 ## ---------------------------------------------------------------------------
-## AnimationTree (StateMachine)
+## State-machine tree
 ## ---------------------------------------------------------------------------
 func _build_state_machine() -> AnimationNodeStateMachine:
-	var sm := AnimationNodeStateMachine.new()
-	var loco := AnimationNodeBlendTree.new()
+	var sm: AnimationNodeStateMachine = AnimationNodeStateMachine.new()
+
+	# Locomotion tree: BlendSpace1D for speed, Blend2 for lane lean.
+	var loco: AnimationNodeBlendTree = AnimationNodeBlendTree.new()
 	loco.add_node("output", AnimationNodeOutput.new(), Vector2(500, 80))
-	var bs1d := AnimationNodeBlendSpace1D.new()
+	var bs1d: AnimationNodeBlendSpace1D = AnimationNodeBlendSpace1D.new()
 	bs1d.add_blend_point(_anim("idle"),   0.0)
 	bs1d.add_blend_point(_anim("jog"),    0.55)
 	bs1d.add_blend_point(_anim("sprint"), 1.0)
 	bs1d.blend_mode = AnimationNodeBlendSpace1D.BLEND_MODE_INTERPOLATED
 	bs1d.snap = 0.0
 	loco.add_node("locomotion", bs1d, Vector2(60, 80))
-	var lean := AnimationNodeBlend2.new()
+	var lean: AnimationNodeBlend2 = AnimationNodeBlend2.new()
 	lean.amount = 0.0
 	loco.add_node("lean", lean, Vector2(280, 80))
 	loco.connect_node("lean", 0, "locomotion")
@@ -446,21 +440,21 @@ func _build_state_machine() -> AnimationNodeStateMachine:
 	sm.add_node("slide",   _anim("slide"),   Vector2(280,  150))
 	sm.add_node("stumble", _anim("stumble"), Vector2(560,  150))
 
-	_add_sm_trans(sm, "locomotion", "jump",   0.08, false)
-	_add_sm_trans(sm, "jump",       "fall",   0.10, true)
-	_add_sm_trans(sm, "fall",       "land",   0.10, true)
-	_add_sm_trans(sm, "land",       "locomotion", 0.12, true)
-	_add_sm_trans(sm, "locomotion", "slide",  0.06, false)
-	_add_sm_trans(sm, "slide",      "locomotion", 0.10, true)
-	_add_sm_trans(sm, "locomotion", "stumble",0.10, false)
-	_add_sm_trans(sm, "stumble",    "locomotion", 0.12, true)
-	_add_sm_trans(sm, "jump",       "slide",  0.08, false)
+	_add_trans(sm, "locomotion", "jump",       0.08, false)
+	_add_trans(sm, "jump",       "fall",       0.10, true)
+	_add_trans(sm, "fall",       "land",       0.10, true)
+	_add_trans(sm, "land",       "locomotion", 0.12, true)
+	_add_trans(sm, "locomotion", "slide",      0.06, false)
+	_add_trans(sm, "slide",      "locomotion", 0.10, true)
+	_add_trans(sm, "locomotion", "stumble",    0.10, false)
+	_add_trans(sm, "stumble",    "locomotion", 0.12, true)
+	_add_trans(sm, "jump",       "slide",      0.08, false)
 	sm.start_node = "locomotion"
 	return sm
 
 
-func _add_sm_trans(sm: AnimationNodeStateMachine, from: String, to: String, xfade: float, auto: bool) -> void:
-	var t := AnimationNodeStateMachineTransition.new()
+func _add_trans(sm: AnimationNodeStateMachine, from: String, to: String, xfade: float, auto: bool) -> void:
+	var t: AnimationNodeStateMachineTransition = AnimationNodeStateMachineTransition.new()
 	if auto:
 		t.switch_mode = AnimationNodeStateMachineTransition.SWITCH_MODE_AT_END
 		t.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_AUTO
@@ -472,43 +466,22 @@ func _add_sm_trans(sm: AnimationNodeStateMachine, from: String, to: String, xfad
 
 
 func _anim(name: String) -> AnimationNodeAnimation:
-	var n := AnimationNodeAnimation.new()
-	n.animation = name
-	return n
+	var a: AnimationNodeAnimation = AnimationNodeAnimation.new()
+	a.animation = name
+	return a
 
 
 ## ---------------------------------------------------------------------------
-## Mesh fit/orient
+## PBR suit material application
 ## ---------------------------------------------------------------------------
-func _fit_mesh_to_game(root: Node3D) -> void:
-	var mi := _find_first_mesh(root)
-	if mi == null:
-		push_warning("[HeroBuilder] No mesh found; leaving default scale")
-		return
-	var aabb := mi.get_aabb()
-	var height := aabb.size.y
-	var s := 1.0
-	if height > 4.0:
-		s = 1.7 / height
-	root.scale = Vector3(s, s, s)
-	root.position.y = -aabb.position.y * s
-	root.rotation = Vector3.ZERO
-
-
-func _find_first_mesh(root: Node) -> MeshInstance3D:
-	for c in root.get_children():
-		if c is MeshInstance3D and (c as MeshInstance3D).mesh != null:
-			return c as MeshInstance3D
-		var hit := _find_first_mesh(c)
-		if hit:
-			return hit
-	return null
-
-
-func _iter_nodes_of_type(root: Node, type_obj: Variant) -> Array:
-	var out := []
-	if root.is_class(type_obj):
-		out.append(root)
-	for c in root.get_children():
-		out.append_array(_iter_nodes_of_type(c, type_obj))
-	return out
+func _apply_material(root: Node, mat: Material) -> void:
+	for node in _nodes_of_type(root, MeshInstance3D):
+		var mi: MeshInstance3D = node as MeshInstance3D
+		if mi.mesh == null:
+			continue
+		var ln: String = mi.name.to_lower()
+		if ln.find("eye") != -1 or ln.find("lashes") != -1 or ln.find("teeth") != -1:
+			continue
+		for s in range(mi.mesh.get_surface_count()):
+			mi.set_surface_override_material(s, mat)
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON

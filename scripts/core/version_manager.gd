@@ -6,7 +6,7 @@
 ## "What's new" popup instead of surprising the player.
 extends Node
 
-const CURRENT_VERSION := "1.1.1"
+const CURRENT_VERSION := "1.2.0"
 const VERSION_FILE := "user://version.cfg"
 
 var previous_version: String = ""
