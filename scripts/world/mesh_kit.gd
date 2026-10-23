@@ -33,6 +33,8 @@ static var _mat_facade: Array[StandardMaterial3D] = [null, null, null]
 static var _mat_water: StandardMaterial3D
 static var _mat_steel: StandardMaterial3D
 static var _mat_concrete_photo: StandardMaterial3D
+static var _mat_frond: StandardMaterial3D
+static var _mat_leaves: StandardMaterial3D
 static var _mat_emissive: Dictionary = {}
 
 
@@ -418,16 +420,56 @@ static func _photo_mat(path: String, tile: Vector2, roughness: float,
 ## Instantiates every material the street can use, so their textures are loaded
 ## and decoded at boot instead of during the first frame that needs them (a
 ## 1024x1024 JPEG decode on the main thread is a visible hitch on a phone).
-static func warm_materials() -> int:
-	var made := 0
-	for m: StandardMaterial3D in [
+## Alpha-cut foliage. Foliage was the last cartoon element in the frame: nine
+## flat green quads per palm crown. The same quads, textured with a feathered
+## alpha frond, read as a real palm from the chase camera - and alpha *scissor*
+## (not blend) keeps them cheap and depth-correct on mobile GLES3.
+static func foliage_material(path: String, threshold: float = 0.32) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = load(path)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	m.alpha_scissor_threshold = threshold
+	# Per-frond tint from the vertex colours, so one texture serves a whole
+	# avenue of palms without every crown looking identical.
+	m.vertex_color_use_as_albedo = true
+	m.roughness = 0.94
+	m.metallic = 0.0
+	m.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	return m
+
+
+static func palm_frond_material() -> StandardMaterial3D:
+	if _mat_frond == null:
+		_mat_frond = foliage_material("res://assets/textures/palm_frond.png", 0.35)
+	return _mat_frond
+
+
+static func leaf_cluster_material() -> StandardMaterial3D:
+	if _mat_leaves == null:
+		_mat_leaves = foliage_material("res://assets/textures/leaf_cluster.png", 0.38)
+	return _mat_leaves
+
+
+## Every material the street, the props and the foliage can draw with.
+static func materials() -> Array[StandardMaterial3D]:
+	return [
 			vertex_material(), vertex_material_cheap(), road_material(),
 			concrete_material(), sand_material(), glass_material(),
 			facade_flat_material(), water_flat_material(), steel_flat_material(),
 			asphalt_photo_material(), pavement_photo_material(),
 			facade_material(0), facade_material(1), facade_material(2),
 			water_photo_material(), steel_truss_material(),
-			concrete_photo_material()]:
+			concrete_photo_material(), palm_frond_material(),
+			leaf_cluster_material()]
+
+
+## Instantiate the whole material set so every texture is decoded at boot
+## instead of on the frame that first needs it.
+static func warm_materials() -> int:
+	var made := 0
+	for m: StandardMaterial3D in materials():
 		if m != null:
 			made += 1
 	return made

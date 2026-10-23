@@ -22,9 +22,9 @@ const KIT := preload("res://scripts/world/mesh_kit.gd")
 ## its RNG seed. Requiring one specific name fails a perfectly good street.
 const EXPECTED := {
 	0: ["road", "walk", "art", "ground", "facade*"],
-	1: ["road", "walk", "art", "ground", "facade*"],
-	2: ["road", "walk", "art", "ground", "facade*", "water", "concrete"],
-	3: ["road", "walk", "art", "ground", "facade*"],
+	1: ["road", "walk", "art", "ground", "facade*", "leaves"],
+	2: ["road", "walk", "art", "ground", "facade*", "water", "concrete", "leaf"],
+	3: ["road", "walk", "art", "ground", "facade*", "leaves"],
 	4: ["road", "walk", "art", "ground", "water", "steel", "concrete"],
 	5: ["road", "walk", "art", "ground", "water", "concrete"],
 	6: ["road", "walk", "art", "ground", "facade*"],
@@ -74,7 +74,8 @@ func _check_textures() -> void:
 		"asphalt_photo.jpg", "asphalt_photo_normal.png", "asphalt_photo_rough.png",
 		"pavement_photo.jpg", "pavement_photo_normal.png", "water_photo.jpg",
 		"facade_atlas.jpg", "truss_steel.jpg", "truss_steel_normal.png",
-		"concrete_photo.jpg",
+		"concrete_photo.jpg", "asphalt_grain.jpg", "palm_frond.png",
+		"leaf_cluster.png",
 	]
 	for name in required:
 		var path: String = "res://assets/textures/" + String(name)
@@ -118,7 +119,7 @@ func _check_segments() -> void:
 				# A surface with a texture needs UVs, or the photo collapses to
 				# one pixel.
 				if String(names[i]) in ["road", "walk", "facade", "facade_b", "facade_c",
-						"water", "steel", "concrete"]:
+						"water", "steel", "concrete", "leaf", "leaves"]:
 					if arrays.size() <= Mesh.ARRAY_TEX_UV or (arrays[Mesh.ARRAY_TEX_UV] as PackedVector2Array).is_empty():
 						_problems.append("variant %d surface '%s' has no UVs" % [variant, names[i]])
 			if tris < 200:

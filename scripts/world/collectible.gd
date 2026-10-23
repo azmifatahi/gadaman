@@ -69,6 +69,23 @@ static func _get_ring_material() -> StandardMaterial3D:
 	return _ring_material
 
 
+## Every material a cup can draw with, built without instancing a node.
+## Called from the boot warm-up so the first cup of a run does not compile a
+## shader on the frame it appears.
+static func warm_materials() -> Array[Material]:
+	var out: Array[Material] = []
+	out.append(_get_ring_material())
+	var cup := MeshKit.vertex_material().duplicate() as StandardMaterial3D
+	cup.roughness = 1.0
+	cup.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	cup.emission_enabled = false
+	out.append(cup)
+	if Perf.tier == Perf.Tier.LOW:
+		for kind in range(PropLibrary.CUP_COLORS.size()):
+			out.append(PropLibrary.cup_sprite_material(kind))
+	return out
+
+
 func activate(new_kind: int, x: float, y: float, z: float) -> void:
 	if _cup == null:
 		_ready()

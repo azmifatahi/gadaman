@@ -78,6 +78,61 @@ func _warm_up() -> void:
 	track.warm_for_quality()
 	print("[Warmup] %d materials, %s, %d ms" % [
 		materials, SegmentBuilder.stats(), Time.get_ticks_msec() - started])
+	await _warm_shaders()
+
+
+## Draws every material once, off to the side of the camera, behind the menu.
+##
+## This is the part of the freeze that has nothing to do with meshes: on Android
+## GLES3 a *shader* is compiled the first time a material is drawn, and the
+## photographic surfaces (asphalt with normal + roughness, water, truss steel,
+## the three facades, the foliage cut-outs) each cost a visible stall - a second
+## or more on a mid-range phone. They all first appeared 250-650 m into a run,
+## which is exactly "the game hangs after a distance".
+##
+## One tiny quad per material for two frames compiles all of them while the menu
+## is still up, so a run never compiles a shader again.
+func _warm_shaders() -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	var cam: Camera3D = get_viewport().get_camera_3d()
+	if cam == null:
+		return
+	var mats: Array[Material] = []
+	for m: StandardMaterial3D in MeshKit.materials():
+		if m != null:
+			mats.append(m)
+	mats.append_array(Collectible.warm_materials())
+	for child in fx.get_children():
+		var particles := child as GPUParticles3D
+		if particles != null and particles.draw_pass_1 != null:
+			var pm := particles.draw_pass_1.material
+			if pm != null:
+				mats.append(pm)
+	var skyline := get_node_or_null("KhartoumSkyline") as MeshInstance3D
+	if skyline != null and skyline.material_override != null:
+		mats.append(skyline.material_override)
+
+	var rig := Node3D.new()
+	rig.name = "ShaderWarmup"
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.06, 0.06)
+	for i in mats.size():
+		var mi := MeshInstance3D.new()
+		mi.mesh = quad
+		mi.material_override = mats[i]
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.position = Vector3(-0.12 + 0.008 * float(i), -0.06, -0.35)
+		rig.add_child(mi)
+	cam.add_child(rig)
+	# Two full frames: the first queues the draw, the second guarantees the
+	# renderer actually ran the pipelines with the menu still covering them.
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	rig.queue_free()
+	print("[Warmup] %d shader materials drawn" % mats.size())
 
 
 # ---------------------------------------------------------------------------
@@ -389,10 +444,10 @@ func _run_smoke_test() -> void:
 		player.change_lane(1 if i % 2 == 0 else -1)
 
 	# --- soak -------------------------------------------------------------
-	# Six kilometres of track in a fraction of a second. That is ~75 segment
-	# recycles and a few thousand prop respawns, i.e. exactly what a long run
-	# does - and the assertion is that it allocates no meshes and that the
-	# heap does not grow. This is the regression test for "the game freezes
+	# ~100 minutes of running at top speed (≈160 km of track, a couple of
+	# thousand segment recycles and tens of thousands of prop respawns) in a
+	# fraction of a second. The assertion is that it allocates no meshes and
+	# that the heap does not grow: the regression test for "the game freezes
 	# after a distance".
 	await get_tree().process_frame
 	var mem_before := OS.get_static_memory_usage()

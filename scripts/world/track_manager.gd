@@ -556,13 +556,15 @@ func debug_stats() -> String:
 		_active_cups.size(), SegmentBuilder.stats()]
 
 
-## Advances the world by `meters` without waiting for real time.
+## Advances the world by `seconds` of simulated play at the current speed,
+## without waiting for real time.
 ##
-## Used by the CI soak test: 6 km of track in a fraction of a second exercises
-## hundreds of segment recycles and thousands of prop respawns, which is the
-## only way to prove "a long run allocates nothing" on a build server.
-func soak(meters: float, step: float = 0.5) -> void:
-	var remaining := meters
+## Used by the CI soak test: ~100 minutes of running covers roughly 160 km of
+## track and a couple of thousand segment recycles in a fraction of a second,
+## which is the only way to prove "a long run allocates nothing" on a build
+## server.
+func soak(seconds: float, step: float = 0.5) -> void:
+	var remaining := seconds
 	while remaining > 0.0:
 		var dt := minf(step, remaining)
 		var travel := speed * dt

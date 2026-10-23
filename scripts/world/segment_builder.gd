@@ -79,7 +79,7 @@ static var run_guard: bool = false
 ## materials; adding a surface here is all it takes to give the street a new
 ## photographic material.
 const SURFACES := ["road", "walk", "art", "ground", "facade", "facade_b",
-	"facade_c", "water", "steel", "concrete"]
+	"facade_c", "water", "steel", "concrete", "leaf", "leaves"]
 
 
 ## Cache identity of one built district. The variant is normalised first so a
@@ -142,6 +142,8 @@ static func build(variant: int, slot: int, density: float) -> ArrayMesh:
 		"water": MeshKit.begin(),
 		"steel": MeshKit.begin(),
 		"concrete": MeshKit.begin(),
+		"leaf": MeshKit.begin(),
+		"leaves": MeshKit.begin(),
 	}
 
 	_build_ground(tools["ground"], variant % VARIANT_COUNT)
@@ -320,7 +322,7 @@ static func _build_street(tools: Dictionary, rng: RandomNumberGenerator, density
 			var fz := -LENGTH * 0.5 + 6.0 + float(i) * 12.0 + rng.randf_range(-2.0, 2.0)
 			_lamp(st, side, fz)
 			if rng.randf() < 0.7:
-				_acacia(st, side * (INNER + 1.4), fz + 4.0, rng)
+				_acacia(st, tools["leaves"], side * (INNER + 1.4), fz + 4.0, rng)
 			if rng.randf() < 0.5 * density:
 				_parked_car(st, side, fz + 6.5, rng)
 		if rng.randf() < 0.5:
@@ -416,7 +418,8 @@ static func _lamp(st: SurfaceTool, side: float, z: float) -> void:
 ## road - the single most cartoonish thing left in the frame. The canopy is now a
 ## fan of narrow, slightly drooping leaf clusters around a dark core, in muted
 ## olive tones, so it reads as a tree at chase-camera distance and costs 12 quads.
-static func _acacia(st: SurfaceTool, x: float, z: float, rng: RandomNumberGenerator) -> void:
+static func _acacia(st: SurfaceTool, leaves_st: SurfaceTool, x: float, z: float,
+		rng: RandomNumberGenerator) -> void:
 	var h := rng.randf_range(2.6, 3.8)
 	var base := Vector3(x, 0.16, z)
 	MeshKit.add_cylinder(st, base, 0.17, h, Color("#54402e"), 5, 0.12)
@@ -428,31 +431,26 @@ static func _acacia(st: SurfaceTool, x: float, z: float, rng: RandomNumberGenera
 				base + Vector3(0.13, h * 0.55, 0.13), tip + Vector3(0.13, 0, 0.13), tip,
 				Color("#6b5238"))
 	var crown := h + 0.55
-	var spread := rng.randf_range(1.5, 2.3)
-	# Many small, narrow leaflet clusters rather than a few big blades: at 3-4 m
-	# from the chase camera a 1.4 m leaf reads as a shard, not a tree.
-	var leaves := 22
-	for i in leaves:
-		var a := TAU * float(i) / float(leaves) + rng.randf_range(-0.12, 0.12)
+	var spread := rng.randf_range(1.6, 2.4)
+	var core := base + Vector3(0, crown, 0)
+	# Dome of alpha cluster cards. Each card faces a different way, so from any
+	# camera angle several overlap and the crown reads as foliage with sky
+	# showing through it - instead of the old fan of solid green blades.
+	var cards := 13
+	for i in cards:
+		var a := TAU * float(i) / float(cards) + rng.randf_range(-0.18, 0.18)
 		var dir := Vector3(cos(a), 0.0, sin(a))
-		var arm := spread * rng.randf_range(0.55, 1.0)
-		var droop := rng.randf_range(0.12, 0.6)
-		var mid := base + Vector3(0, crown + 0.30, 0) + dir * (arm * 0.5)
-		var tip := base + Vector3(0, crown - droop, 0) + dir * arm
-		var perp := Vector3(-dir.z, 0.0, dir.x) * rng.randf_range(0.16, 0.26)
-		var col: Color = PALETTE["leaf"] if i % 3 else PALETTE["leaf_dark"]
-		MeshKit.add_quad(st, mid - perp, mid + perp, tip + perp * 0.4, tip - perp * 0.4,
-				col.darkened(rng.randf_range(0.0, 0.14)))
-	# A second, tighter tier above fills the crown silhouette.
-	for i in 10:
-		var a := TAU * float(i) / 10.0 + 0.3
-		var dir := Vector3(cos(a), 0.0, sin(a))
-		var arm := spread * 0.5 * rng.randf_range(0.7, 1.1)
-		var mid := base + Vector3(0, crown + 0.95, 0) + dir * (arm * 0.5)
-		var tip := base + Vector3(0, crown + 0.55, 0) + dir * arm
-		var perp := Vector3(-dir.z, 0.0, dir.x) * 0.15
-		MeshKit.add_quad(st, mid - perp, mid + perp, tip + perp * 0.4, tip - perp * 0.4,
-				PALETTE["leaf"].darkened(0.08))
+		var arm := spread * rng.randf_range(0.70, 1.15)
+		var card := rng.randf_range(1.15, 1.75)
+		var centre: Vector3 = core + dir * (arm * 0.55) + Vector3(0, rng.randf_range(-0.10, 0.45), 0)
+		var shade := rng.randf_range(0.70, 1.0)
+		var tint := Color(shade, shade * 1.03, shade * 0.9)
+		MeshKit.add_quad(leaves_st,
+				centre - dir * card * 0.5 - Vector3(0, card * 0.42, 0),
+				centre + dir * card * 0.5 - Vector3(0, card * 0.42, 0),
+				centre + dir * card * 0.5 + Vector3(0, card * 0.42, 0),
+				centre - dir * card * 0.5 + Vector3(0, card * 0.42, 0),
+				tint)
 	# Dark core under the leaves fills the gap when seen from below.
 	MeshKit.add_cylinder(st, base + Vector3(0, crown - 0.25, 0), spread * 0.34, 0.35,
 			PALETTE["leaf_dark"].darkened(0.15), 7)
@@ -493,7 +491,8 @@ static func _build_market(tools: Dictionary, rng: RandomNumberGenerator, density
 				_stall(st, side, z, rng)
 			z += rng.randf_range(7.0, 10.0)
 		for i in 4:
-			_acacia(st, side * (INNER + 0.6), -LENGTH * 0.5 + 5.0 + float(i) * 10.0, rng)
+			_acacia(st, tools["leaves"], side * (INNER + 0.6),
+					-LENGTH * 0.5 + 5.0 + float(i) * 10.0, rng)
 	# Hanging bulb strings across the lane (very Khartoum souq). They sit at
 	# 7 m - above the 4.5 m chase camera - so bulbs never fill the lens.
 	for i in 5:
@@ -559,7 +558,7 @@ static func _build_corniche(tools: Dictionary, rng: RandomNumberGenerator,
 	while z < LENGTH * 0.5:
 		_railing(st, -1.0, z, 2.0, 1.05)
 		if rng.randf() < density:
-			_palm(st, Vector3(-(INNER + 0.4), 0.16, z + 1.0), rng)
+			_palm(st, tools["leaf"], Vector3(-(INNER + 0.4), 0.16, z + 1.0), rng)
 		z += 3.0
 	for i in 2:
 		_lamp(st, 1.0, -LENGTH * 0.5 + 10.0 + float(i) * 18.0)
@@ -613,7 +612,8 @@ static func _railing(st: SurfaceTool, side: float, z: float, span: float, height
 ## Nile palm. The fronds are long and *narrow*: a 0.9 m wide blade seen from
 ## 3 m away is a green sheet, which is exactly what the old version looked like.
 ## Nine 0.2 m fronds per crown read as a palm at chase-camera distance.
-static func _palm(st: SurfaceTool, base: Vector3, rng: RandomNumberGenerator) -> void:
+static func _palm(st: SurfaceTool, leaf_st: SurfaceTool, base: Vector3,
+		rng: RandomNumberGenerator) -> void:
 	var h := rng.randf_range(5.2, 7.8)
 	# Slight lean, so a row of palms is not a picket fence.
 	var lean := Vector3(rng.randf_range(-0.35, 0.35), 0, rng.randf_range(-0.25, 0.25))
@@ -621,23 +621,32 @@ static func _palm(st: SurfaceTool, base: Vector3, rng: RandomNumberGenerator) ->
 	MeshKit.add_cylinder(st, base, 0.2, h, Color("#6f5940"), 6, 0.13)
 	MeshKit.add_cylinder(st, top - Vector3(0, 0.5, 0), 0.42, 0.55,
 			Color("#4a3a28"), 6)
-	for i in 9:
-		var a := TAU * float(i) / 9.0 + rng.randf_range(-0.2, 0.2)
+	# 13 textured fronds per crown. Each one is a single quad running from the
+	# crown to the tip, mapped 0..1 across `palm_frond.png` - the texture carries
+	# the leaflets, so the silhouette is a palm instead of a green shard.
+	for i in 13:
+		var a := TAU * float(i) / 13.0 + rng.randf_range(-0.16, 0.16)
 		var dir := Vector3(cos(a), 0, sin(a))
-		var reach := rng.randf_range(1.5, 2.3)
-		var mid := top + dir * (reach * 0.55) + Vector3(0, 0.3, 0)
-		var tip := top + dir * reach + Vector3(0, -rng.randf_range(0.5, 1.1), 0)
-		var perp := Vector3(-dir.z, 0.25, dir.x) * rng.randf_range(0.14, 0.22)
-		var col: Color = PALETTE["palm"].darkened(rng.randf_range(0.0, 0.2))
-		MeshKit.add_quad(st, mid - perp, mid + perp, tip + perp * 0.3, tip - perp * 0.3, col)
-	# Dead fronds hanging under the crown - every Khartoum palm has them.
-	for i in 4:
-		var a := TAU * float(i) / 4.0 + 0.4
+		var reach := rng.randf_range(2.1, 2.9)
+		# Younger fronds stand up, older ones droop: the crown has a profile.
+		var lift := rng.randf_range(0.35, 0.8)
+		var droop := rng.randf_range(0.6, 1.5)
+		var root: Vector3 = top + dir * 0.18 + Vector3(0, lift, 0)
+		var tip: Vector3 = top + dir * reach + Vector3(0, lift - droop, 0)
+		var perp := Vector3(-dir.z, 0.0, dir.x) * rng.randf_range(0.30, 0.42)
+		var shade := rng.randf_range(0.72, 1.0)
+		var tint := Color(shade, shade * 1.04, shade * 0.88)
+		MeshKit.add_quad(leaf_st, root - perp, tip - perp * 0.55,
+				tip + perp * 0.55, root + perp, tint)
+	# Dead fronds hanging under the crown - every Khartoum palm has them. Same
+	# texture, sun-bleached brown: five extra quads, no extra asset.
+	for i in 5:
+		var a := TAU * float(i) / 5.0 + 0.4
 		var dir := Vector3(cos(a), 0, sin(a))
-		var tip := top + dir * 0.9 + Vector3(0, -1.5, 0)
-		var perp := Vector3(-dir.z, 0.0, dir.x) * 0.12
-		MeshKit.add_quad(st, top - perp, top + perp, tip + perp, tip - perp,
-				Color("#8a7448"))
+		var tip: Vector3 = top + dir * 1.05 + Vector3(0, -1.7, 0)
+		var perp := Vector3(-dir.z, 0.0, dir.x) * 0.26
+		MeshKit.add_quad(leaf_st, top - perp, tip - perp * 0.7, tip + perp * 0.7,
+				top + perp, Color("#9c8352"))
 
 
 # ---------------------------------------------------------------------------
@@ -654,7 +663,7 @@ static func _build_neighbourhood(tools: Dictionary, rng: RandomNumberGenerator,
 			z += span + rng.randf_range(1.5, 4.0)
 		for i in 3:
 			var fz := -LENGTH * 0.5 + 5.0 + float(i) * 12.0 + rng.randf_range(-2.0, 2.0)
-			_acacia(st, side * (ROAD_HALF + 1.0), fz, rng)
+			_acacia(st, tools["leaves"], side * (ROAD_HALF + 1.0), fz, rng)
 			if rng.randf() < density:
 				_lamp(st, side, fz + 5.0)
 		# Laundry lines between the walls.
@@ -867,7 +876,7 @@ static func _build_bahri(tools: Dictionary, rng: RandomNumberGenerator,
 			z += span + rng.randf_range(2.0, 4.0)
 		# Acacias + a lamp, same rhythm as the reference photo.
 		for i in 2:
-			_acacia(art, side * (ROAD_HALF + 0.9),
+			_acacia(art, tools["leaves"], side * (ROAD_HALF + 0.9),
 					-LENGTH * 0.5 + 10.0 + float(i) * 16.0, rng)
 		_lamp(art, side, -LENGTH * 0.5 + 6.0)
 
