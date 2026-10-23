@@ -62,7 +62,7 @@ func _check_textures() -> void:
 		"concrete_photo.jpg",
 	]
 	for name in required:
-		var path := "res://assets/textures/" + name
+		var path: String = "res://assets/textures/" + String(name)
 		if not ResourceLoader.exists(path):
 			_problems.append("missing texture %s" % path)
 			continue
@@ -133,7 +133,7 @@ func _check_settings() -> void:
 	var original: int = s.lane_control
 	for mode in [0, 1, 2]:
 		s.set_lane_control(mode)
-		var want_tilt := mode == 2
+		var want_tilt: bool = int(mode) == 2
 		if bool(s.tilt_enabled) != want_tilt:
 			_problems.append("lane_control %d left tilt_enabled=%s" % [mode, s.tilt_enabled])
 		if mode == 1 and not bool(s.show_buttons):
