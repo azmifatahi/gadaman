@@ -158,34 +158,27 @@ jobs:
           godot --headless --editor --quit || true
           python3 tools/ci_configure_android.py
 
-      - name: Build hero scene from Arabic FBX folder (STRICT)
-        timeout-minutes: 8
+      - name: Import project (Godot 4.4 ufbx handles FBX natively)
         run: |
-          # Run import INLINE in the same shell as the hero build (single
-          # Godot invocation doesn't reliably persist .import cache between
-          # steps on fresh runners).
-          mkdir -p "$HOME/.config/godot"
-          set +e
-          (
-            echo "=== first --import pass ==="
-            godot --headless --import 2>&1 | tail -n 30
-            echo "=== second --import pass ==="
-            godot --headless --import 2>&1 | tail -n 10
-            echo "=== listing Arabic FBX folder ==="
-            ls -la "assets/characters/" 2>&1
-            ls -la "assets/characters/الشخصية/" 2>&1
-            echo "=== .godot/imported fbx ==="
-            find .godot/imported -iname "*fbx*" 2>/dev/null | head -40
-            echo "=== hero build ==="
-            godot --headless -v --script tools/ci_build_hero.gd -- --strict 2>&1
-          ) > hero_build.log 2>&1
-          rc=$?
-          set -e
-          echo "--- hero_build.log (rc=$rc) ---"
-          cat hero_build.log
-          echo "--- end log ---"
+          # Mirror the validate job exactly: two headless import passes.
+          godot --headless --import 2>&1 | tail -n 40
+          godot --headless --import 2>&1 | tail -n 10
+
+      - name: Verify FBX files were imported
+        run: |
+          find .godot/imported -name "*Run*Forward*.scn" -o -name "*Jump*.scn" -o -name "*Slide*.scn" 2>/dev/null | head -10 || true
+
+      - name: Build hero scene from Arabic FBX folder (STRICT)
+        timeout-minutes: 5
+        run: |
+          set -x
+          godot --headless -v --script tools/ci_build_hero.gd -- --strict 2>&1 | tee hero_build.log | tail -n 80
           if ! grep -q "Hero build OK" hero_build.log; then
             echo "::error::Hero build failed in APK job – aborting export."
+            echo "--- full hero_build.log ---"
+            cat hero_build.log
+            echo "--- arabic folder ---"
+            ls -la "assets/characters/الشخصية/" 2>/dev/null
             exit 1
           fi
           ls -la assets/models/hero/
