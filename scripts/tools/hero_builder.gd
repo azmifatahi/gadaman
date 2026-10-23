@@ -37,9 +37,9 @@ var _issues: Array[String] = []
 ## ---------------------------------------------------------------------------
 ## Runs the full automated import. Returns true if hero.tscn was saved
 ## successfully. Prints progress to stdout and records any issues in _issues.
-static func build_hero() -> bool:
+static func build_hero(allow_fallback := true) -> bool:
 	var selfb := HeroBuilder.new()
-	return selfb._do_build()
+	return selfb._do_build(allow_fallback)
 
 
 ## Like build_hero() but only builds if hero.tscn is not already present.
@@ -47,7 +47,7 @@ static func build_hero() -> bool:
 static func build_if_missing() -> bool:
 	if ResourceLoader.exists(HERO_SCENE_PATH):
 		return true
-	return build_hero()
+	return build_hero(true)
 
 
 func get_issues() -> Array[String]:
@@ -57,19 +57,25 @@ func get_issues() -> Array[String]:
 ## ---------------------------------------------------------------------------
 ## Build
 ## ---------------------------------------------------------------------------
-func _do_build() -> bool:
+func _do_build(allow_fallback := true) -> bool:
 	_mkdir(HERO_DIR)
 	var arabic_dir := _locate_arabic_folder()
 	if arabic_dir == "":
 		_issues.append("Arabic character folder not found")
-		push_error("[HeroBuilder] %s" % _issues[-1])
+		if not allow_fallback:
+			push_error("[HeroBuilder] %s" % _issues[-1])
+			return false
+		push_warning("[HeroBuilder] %s - leaving procedural model in place" % _issues[-1])
 		return false
 	print("[HeroBuilder] Scanning %s" % arabic_dir)
 
 	var files := _list_fbx(arabic_dir)
 	if files.is_empty():
 		_issues.append("No FBX/GLB files in %s" % arabic_dir)
-		push_error("[HeroBuilder] %s" % _issues[-1])
+		if not allow_fallback:
+			push_error("[HeroBuilder] %s" % _issues[-1])
+			return false
+		push_warning("[HeroBuilder] %s" % _issues[-1])
 		return false
 
 	var skin_path := ""
@@ -87,7 +93,21 @@ func _do_build() -> bool:
 		skin_path = arabic_dir.path_join(files[-1])
 	print("[HeroBuilder] skin = %s, clips = %s" % [skin_path.get_file(), anim_clips.keys()])
 
-	var hero := _build_hero(skin_path, anim_clips)
+	# Try to load the skin FBX (this may fail headlessly if FBX2glTF is
+	# unavailable). If load fails and we're allowed to fall back, return
+	# false without error so the procedural RunnerModel ships instead.
+	var skin_scene: PackedScene = null
+	if ResourceLoader.exists(skin_path):
+		skin_scene = load(skin_path)
+	if skin_scene == null:
+		_issues.append("Cannot load skin FBX %s (FBX2glTF may be missing)" % skin_path)
+		if not allow_fallback:
+			push_error("[HeroBuilder] %s" % _issues[-1])
+			return false
+		push_warning("[HeroBuilder] %s - leaving procedural model in place" % _issues[-1])
+		return false
+
+	var hero := _build_hero_from_scene(skin_scene, skin_path, anim_clips)
 	var pck := PackedScene.new()
 	if pck.pack(hero) != OK:
 		_issues.append("PackScene failed")
@@ -193,7 +213,7 @@ func _classify(file_name: String) -> String:
 ## ---------------------------------------------------------------------------
 ## Hero build (mesh + animplayer + animationtree + PBR material)
 ## ---------------------------------------------------------------------------
-func _build_hero(skin_path: String, clips: Dictionary) -> Node3D:
+func _build_hero_from_scene(skin_scene: PackedScene, skin_path: String, clips: Dictionary) -> Node3D:
 	var hero := Node3D.new()
 	hero.name = "Hero"
 
