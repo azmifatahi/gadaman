@@ -56,6 +56,11 @@ var _fps_accum := 0.0
 var _fps_frames := 0
 var _low_streak := 0
 var _high_streak := 0
+## Restoring resolution is capped: an uncapped "up at 97 %, down at 82 %" loop
+## oscillates forever on a phone that sits right on the boundary, and every
+## scaling_3d_scale change reallocates the 3D framebuffer. Two restores per
+## session is enough to recover from a temporary dip (a phone warming up).
+var _restores_left := 2
 var _base_render_scale := 1.0
 
 
@@ -355,12 +360,13 @@ func _process(delta: float) -> void:
 		if _low_streak >= 2 and render_scale > 0.55:
 			set_render_scale(render_scale - 0.08)
 			_low_streak = 0
-	elif fps > target_fps * 0.97:
+	elif fps > target_fps * 0.97 and _restores_left > 0:
 		_high_streak += 1
 		_low_streak = 0
-		if _high_streak >= 4 and render_scale < _base_render_scale:
-			set_render_scale(render_scale + 0.04)
+		if _high_streak >= 6 and render_scale < _base_render_scale:
+			set_render_scale(render_scale + 0.03)
 			_high_streak = 0
+			_restores_left -= 1
 	else:
 		_low_streak = 0
 		_high_streak = 0
