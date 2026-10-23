@@ -1,0 +1,19 @@
+{
+  "bone_span": 1.819669008255,
+  "bones": 65,
+  "clips": {
+    "fall": 43,
+    "jog": 53,
+    "jump": 53,
+    "land": 43,
+    "slide": 43,
+    "stumble": 53
+  },
+  "feet": 0.0000000000582076609134674,
+  "height": 1.78000378608704,
+  "meshes": 2,
+  "ok": true,
+  "path": "res://assets/models/hero/hero.tscn",
+  "problems": [],
+  "vertices": 28374
+}
