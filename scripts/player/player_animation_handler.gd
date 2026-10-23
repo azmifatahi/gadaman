@@ -16,6 +16,7 @@ extends Node
 
 enum Mode { NONE, TREE, PLAYER }
 
+const HeroAnimationGraph := preload("res://scripts/player/hero_animation_graph.gd")
 const LOCOMOTION_STATES := ["idle", "jog", "sprint"]
 const ONE_SHOTS := ["jump", "fall", "land", "slide", "stumble"]
 
@@ -30,28 +31,9 @@ var _blend: float = 0.0
 
 
 func _ready() -> void:
-	_player_node = get_parent() as Node3D
-	bind_player(_player_node)
-	if _player_node == null:
-		return
-	# Connect controller signals via callables so duplicates are harmless on
-	# scene reload.
-	_connect("jumped", _on_jumped)
-	_connect("landed", _on_landed)
-	_connect("slide_started", _on_slide)
-	_connect("stumbled", _on_stumble)
-	_connect("recovered", _on_recover)
-	_connect("crashed", _on_crash)
-
-
-func _connect(signal_name: String, handler: Callable) -> void:
-	if _player_node == null or not _player_node.has_signal(signal_name):
-		return
-	# Signals are not exposed as properties, so build the Signal by name. This
-	# also keeps the file free of dynamic member access on a Node3D-typed var.
-	var sig := Signal(_player_node, signal_name)
-	if not sig.is_connected(handler):
-		sig.connect(handler)
+	# PlayerController owns the player signals and calls fire(); binding here
+	# only makes the handler usable stand-alone (e.g. in tools/ci_hero_probe.gd).
+	bind_player(get_parent())
 
 
 func bind_player(p: Node) -> void:
@@ -68,6 +50,13 @@ func _refresh() -> void:
 		return
 	_tree = _player_node.get_node_or_null("Model/AnimationTree") as AnimationTree
 	_ap = _player_node.get_node_or_null("Model/AnimationPlayer") as AnimationPlayer
+	# A saved scene can lose `tree_root` (nested resource graphs do not always
+	# survive PackedScene.pack()); rebuild it from the clips on hand instead of
+	# leaving the runner frozen in its T-pose.
+	if _tree != null and not (_tree.tree_root is AnimationNodeStateMachine):
+		if HeroAnimationGraph.can_build(_ap):
+			_tree.tree_root = HeroAnimationGraph.build(_ap)
+			print("[PlayerAnimationHandler] rebuilt AnimationTree root at runtime (%s)" % _tree.tree_root.resource_name)
 	if _tree != null and _tree.tree_root is AnimationNodeStateMachine:
 		_tree.active = true
 		_state_machine = _tree.get("parameters/playback") as AnimationNodeStateMachinePlayback
@@ -87,6 +76,12 @@ func _refresh() -> void:
 		_ap.animation_finished.connect(_on_animation_finished)
 
 
+func debug_state() -> String:
+	return "handler mode=%d blend=%.2f blend_path='%s' current='%s' state='%s'" % [
+		_mode, _blend, _blend_path, _current,
+		_state_machine.get_current_node() if _state_machine != null else "-"]
+
+
 func _discover_blend_path() -> void:
 	var root := _tree.tree_root
 	if not (root is AnimationNodeStateMachine):
@@ -96,7 +91,7 @@ func _discover_blend_path() -> void:
 		return
 	var loco := sm.get_node("locomotion")
 	if loco is AnimationNodeBlendTree and (loco as AnimationNodeBlendTree).has_node("locomotion"):
-		_blend_path = "parameters/locomotion/locomotion/blend_position"
+		_blend_path = HeroAnimationGraph.BLEND_PATH
 
 
 ## 0 = idle, 0.55 = jog, 1 = sprint.
@@ -128,13 +123,13 @@ func _travel(state: String) -> void:
 			if state == "locomotion":
 				_play_player(_locomotion_clip(), 0.15)
 			else:
-				_play_player(state, 0.10)
+				_play_player(state, 0.10, true)
 
 
-func _play_player(clip: String, fade: float) -> void:
+func _play_player(clip: String, fade: float, restart: bool = false) -> void:
 	if _ap == null or not _ap.has_animation(clip):
 		return
-	if _current == clip and _ap.is_playing():
+	if not restart and _current == clip and _ap.is_playing():
 		return
 	_ap.play(clip, fade)
 	_current = clip
@@ -167,35 +162,3 @@ func _on_animation_finished(anim_name: StringName) -> void:
 		return
 	if ONE_SHOTS.has(String(anim_name)):
 		_play_player(_locomotion_clip(), 0.2)
-
-
-# ---------------------------------------------------------------------------
-# Signal handlers
-# ---------------------------------------------------------------------------
-func _on_jumped() -> void:
-	_travel("jump")
-
-
-func _on_landed() -> void:
-	if _mode == Mode.TREE:
-		if _state_machine != null and _state_machine.get_current_node() == "fall":
-			_travel("land")
-	else:
-		_play_player("land", 0.1)
-
-
-func _on_slide() -> void:
-	_travel("slide")
-
-
-func _on_stumble() -> void:
-	_travel("stumble")
-
-
-func _on_recover() -> void:
-	_travel("locomotion")
-
-
-func _on_crash() -> void:
-	# No dedicated crash clip in the character folder: hold the stumble pose.
-	_travel("stumble")

@@ -452,6 +452,9 @@ jobs:
           USER_DIR="$HOME/.local/share/godot/app_userdata/Sudan Runner"
           ls -la "$USER_DIR" || true
           cp "$USER_DIR"/shot_*.png docs/screenshots/ 2>/dev/null || true
+          cp "$USER_DIR"/hero_state.txt docs/hero_state.txt 2>/dev/null || true
+          echo "--- hero_state (runtime truth) ---"
+          cat docs/hero_state.txt 2>/dev/null || echo "(no hero_state.txt)"
           ls -la docs/screenshots
 
       - name: Commit screenshots to the branch
@@ -471,6 +474,13 @@ jobs:
           fi
           if [ -f docs/hero_scene.txt ]; then
             git add docs/hero_scene.txt
+          fi
+          if [ -f docs/hero_state.txt ]; then
+            git add docs/hero_state.txt
+          fi
+          if [ -f hero_build.log ]; then
+            cp hero_build.log docs/hero_build.txt
+            git add docs/hero_build.txt
           fi
           git commit -m "docs: automated gameplay screenshots"
           git push origin "HEAD:${{ github.ref_name }}"

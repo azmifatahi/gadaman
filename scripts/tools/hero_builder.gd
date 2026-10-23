@@ -269,7 +269,7 @@ func _do_build(strict := false) -> bool:
 	var tree := AnimationTree.new()
 	tree.name = "AnimationTree"
 	tree.anim_player = NodePath("../AnimationPlayer")
-	tree.tree_root = _build_state_machine()
+	tree.tree_root = ANIM_GRAPH.build(anim_player)
 	tree.active = true
 	hero.add_child(tree, true)
 
@@ -938,66 +938,6 @@ func _own_tree(root: Node) -> void:
 
 
 ## ---------------------------------------------------------------------------
-## State machine
-## ---------------------------------------------------------------------------
-func _build_state_machine() -> AnimationNodeStateMachine:
-	var sm := AnimationNodeStateMachine.new()
-	sm.resource_name = "HeroStates"
-
-	var loco := AnimationNodeBlendTree.new()
-	loco.resource_name = "LocomotionTree"
-	loco.add_node("output", AnimationNodeOutput.new(), Vector2(500, 80))
-	var bs1d := AnimationNodeBlendSpace1D.new()
-	bs1d.resource_name = "RunBlend"
-	bs1d.add_blend_point(_anim("idle"), 0.0)
-	bs1d.add_blend_point(_anim("jog"), 0.55)
-	bs1d.add_blend_point(_anim("sprint"), 1.0)
-	bs1d.blend_mode = AnimationNodeBlendSpace1D.BLEND_MODE_INTERPOLATED
-	bs1d.snap = 0.0
-	loco.add_node("locomotion", bs1d, Vector2(60, 80))
-	loco.connect_node("output", 0, "locomotion")
-	sm.add_node("locomotion", loco, Vector2(0, 0))
-
-	sm.add_node("jump", _anim("jump"), Vector2(280, -150))
-	sm.add_node("fall", _anim("fall"), Vector2(520, -150))
-	sm.add_node("land", _anim("land"), Vector2(780, -150))
-	sm.add_node("slide", _anim("slide"), Vector2(280, 150))
-	sm.add_node("stumble", _anim("stumble"), Vector2(560, 150))
-
-	_add_trans(sm, "locomotion", "jump", 0.08, false)
-	_add_trans(sm, "jump", "fall", 0.10, true)
-	_add_trans(sm, "fall", "land", 0.10, true)
-	_add_trans(sm, "land", "locomotion", 0.12, true)
-	_add_trans(sm, "locomotion", "slide", 0.06, false)
-	_add_trans(sm, "slide", "locomotion", 0.10, true)
-	_add_trans(sm, "locomotion", "stumble", 0.10, false)
-	_add_trans(sm, "stumble", "locomotion", 0.12, true)
-	_add_trans(sm, "jump", "slide", 0.08, false)
-	sm.start_node = "locomotion"
-	return sm
-
-
-func _add_trans(sm: AnimationNodeStateMachine, from: String, to: String,
-		xfade: float, auto_advance: bool) -> void:
-	var t := AnimationNodeStateMachineTransition.new()
-	if auto_advance:
-		t.switch_mode = AnimationNodeStateMachineTransition.SWITCH_MODE_AT_END
-		t.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_AUTO
-	else:
-		t.switch_mode = AnimationNodeStateMachineTransition.SWITCH_MODE_IMMEDIATE
-		t.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_ENABLED
-	# Godot 4 renamed this property: it is `xfade_time`, not `fade_time`.
-	t.xfade_time = xfade
-	sm.add_transition(from, to, t)
-
-
-func _anim(anim_name: String) -> AnimationNodeAnimation:
-	var a := AnimationNodeAnimation.new()
-	a.animation = anim_name
-	return a
-
-
-## ---------------------------------------------------------------------------
 ## Verification (used by the builder itself, the editor tool and CI)
 ## ---------------------------------------------------------------------------
 func _do_verify(path: String) -> Dictionary:
@@ -1012,6 +952,7 @@ func _do_verify(path: String) -> Dictionary:
 		"bone_span": 0.0,
 		"clips": {},
 		"tree_root": "",
+		"motion": {},
 		"problems": [],
 		"warnings": [],
 	}
@@ -1079,6 +1020,18 @@ func _do_verify(path: String) -> Dictionary:
 			clips[key] = resolved
 			if resolved <= 0:
 				problems.append("clip '%s' has no track that resolves inside the hero" % key)
+	# Does playing the clips actually POSE the skeleton? Track counts cannot tell
+	# you that — v1.2.2 passed every data check and still stood in a T-pose.
+	var motion: Dictionary = _probe_clip_motion(ap, skeleton_of(inst))
+	report["motion"] = motion
+	for key in ["jog", "jump", "slide"]:
+		if not motion.has(key):
+			continue
+		var m: Dictionary = motion[key]
+		print("[HeroBuilder] %-7s length=%.2fs tracks=%d moved=%d/%d bones" % [
+			key, float(m["length"]), int(m["tracks"]), int(m["moved"]), int(m["bones"])])
+		if bool(m["playable"]) and int(m["moved"]) <= 0:
+			problems.append("clip '%s' plays but moves 0 bones (skeleton would stay in its T-pose)" % key)
 	var anim_tree := _find_first_animation_tree(inst)
 	var warnings: Array = report["warnings"]
 	if anim_tree == null:
@@ -1109,6 +1062,61 @@ func _do_verify(path: String) -> Dictionary:
 	report["ok"] = problems.is_empty()
 	inst.free()
 	return report
+
+
+func skeleton_of(root: Node) -> Skeleton3D:
+	var best: Skeleton3D = null
+	for node in root.find_children("*", "Skeleton3D", true, false):
+		var sk := node as Skeleton3D
+		if sk != null and (best == null or sk.get_bone_count() > best.get_bone_count()):
+			best = sk
+	return best
+
+
+## Plays every clip on the scene's AnimationPlayer and counts how many bones
+## actually change pose. Runs off-tree (the builder owns no SceneTree), so the
+## result is recorded as data instead of being assumed.
+func _probe_clip_motion(ap: AnimationPlayer, skel: Skeleton3D) -> Dictionary:
+	var out: Dictionary = {}
+	if ap == null or skel == null:
+		return out
+	for raw_name in ap.get_animation_list():
+		var key := String(raw_name)
+		var anim := ap.get_animation(raw_name)
+		if anim == null:
+			continue
+		var before := _pose_snapshot(skel)
+		ap.play(raw_name)
+		var playable := ap.is_playing()
+		if playable:
+			ap.seek(minf(anim.length * 0.5, 0.4), true)
+		var moved := _count_moved_poses(before, _pose_snapshot(skel))
+		out[key] = {
+			"length": anim.length,
+			"tracks": anim.get_track_count(),
+			"playable": playable,
+			"moved": moved,
+			"bones": skel.get_bone_count(),
+		}
+	ap.stop()
+	return out
+
+
+func _pose_snapshot(skel: Skeleton3D) -> Array:
+	var out: Array = []
+	for i in range(skel.get_bone_count()):
+		out.append(skel.get_bone_pose_rotation(i))
+	return out
+
+
+func _count_moved_poses(before: Array, after: Array) -> int:
+	var moved := 0
+	for i in range(mini(before.size(), after.size())):
+		var a: Quaternion = before[i]
+		var b: Quaternion = after[i]
+		if absf(a.dot(b)) < 0.9999:
+			moved += 1
+	return moved
 
 
 func _find_first_animation_player(root: Node) -> AnimationPlayer:

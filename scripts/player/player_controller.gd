@@ -247,12 +247,10 @@ func reset() -> void:
 	if _model:
 		_model.set_state(RunnerModel.State.RUN)
 		_model.reset_pose()
-	if _using_imported_hero and _anim_player:
-		if _anim_player.has_animation("idle"):
-			_anim_player.play("idle")
-		elif _anim_player.has_animation("jog"):
-			_anim_player.play("jog")
-	if _anim_tree:
+	# Never call AnimationPlayer.play() on a player driven by an AnimationTree:
+	# the tree owns playback, a direct play() is overwritten (or freezes the
+	# pose). The handler picks the right back-end, so just ask it for idle.
+	if _using_imported_hero:
 		_reset_tree_oneshots()
 	if _blob:
 		_blob.visible = true
@@ -345,6 +343,42 @@ func _physics_process(delta: float) -> void:
 	if absf(intensity - _last_intensity) > 0.025:
 		_last_intensity = intensity
 		action_intensity_changed.emit(intensity)
+
+
+## Compact description of the visual rig, used by the CI screenshot session.
+## It is the runtime truth: the screenshots only prove what this says is drawn.
+func animation_debug() -> String:
+	var lines := PackedStringArray()
+	lines.append("using_imported_hero=%s" % _using_imported_hero)
+	var model := get_node_or_null("Model")
+	lines.append("model=%s" % (String(model.name) if model != null else "<none>"))
+	if model != null:
+		var kids := PackedStringArray()
+		for c in model.get_children():
+			kids.append(String(c.name))
+		lines.append("model_children=%s" % ", ".join(kids))
+	if _anim_player != null:
+		lines.append("anim_player clip='%s' playing=%s t=%.3f speed=%.2f" % [
+			String(_anim_player.current_animation), _anim_player.is_playing(),
+			_anim_player.get_current_animation_position(), _anim_player.speed_scale])
+	if _anim_tree != null:
+		lines.append("anim_tree active=%s root=%s" % [
+			_anim_tree.active,
+			_anim_tree.tree_root.get_class() if _anim_tree.tree_root != null else "<null>"])
+	if _anim_handler != null and _anim_handler.has_method("debug_state"):
+		lines.append(String(_anim_handler.call("debug_state")))
+	var skel: Skeleton3D = null
+	if model != null:
+		for node in model.find_children("*", "Skeleton3D", true, false):
+			skel = node as Skeleton3D
+			break
+	if skel != null:
+		lines.append("bones=%d" % skel.get_bone_count())
+		var poses := PackedStringArray()
+		for i in range(mini(3, skel.get_bone_count())):
+			poses.append("%s=%s" % [skel.get_bone_name(i), skel.get_bone_pose_rotation(i)])
+		lines.append("bone_pose[0..2] %s" % ", ".join(poses))
+	return "\n".join(lines)
 
 
 func _reset_tree_oneshots() -> void:
