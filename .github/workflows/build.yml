@@ -158,25 +158,27 @@ jobs:
           godot --headless --editor --quit || true
           python3 tools/ci_configure_android.py
 
-      - name: Import project (native ufbx FBX importer, Godot 4.4)
-        run: |
-          # In the APK job we have a FRESH checkout so we have to create the
-          # editor settings first, then run import in editor mode (which
-          # processes importer defaults and writes .import files), then in
-          # headless mode. Validate gets away with just headless because it
-          # does a quit-after smoke run that forces reimport as a side effect.
-          mkdir -p "$HOME/.config/godot"
-          godot --headless --editor --quit 2>&1 | tail -5 || true
-          godot --headless --import 2>&1 | tail -n 40
-          godot --headless --import 2>&1 | tail -n 10
-          echo "--- .godot/imported (FBX-related) ---"
-          find .godot/imported -iname "*run*" -o -iname "*jump*" -o -iname "*slide*" -o -iname "*stumble*" -o -iname "*fall*" -o -iname "*land*" 2>/dev/null | head -20
-
       - name: Build hero scene from Arabic FBX folder (STRICT)
-        timeout-minutes: 5
+        timeout-minutes: 8
         run: |
+          # Run import INLINE in the same shell as the hero build (single
+          # Godot invocation doesn't reliably persist .import cache between
+          # steps on fresh runners).
+          mkdir -p "$HOME/.config/godot"
           set +e
-          godot --headless -v --script tools/ci_build_hero.gd -- --strict > hero_build.log 2>&1
+          (
+            echo "=== first --import pass ==="
+            godot --headless --import 2>&1 | tail -n 30
+            echo "=== second --import pass ==="
+            godot --headless --import 2>&1 | tail -n 10
+            echo "=== listing Arabic FBX folder ==="
+            ls -la "assets/characters/" 2>&1
+            ls -la "assets/characters/الشخصية/" 2>&1
+            echo "=== .godot/imported fbx ==="
+            find .godot/imported -iname "*fbx*" 2>/dev/null | head -40
+            echo "=== hero build ==="
+            godot --headless -v --script tools/ci_build_hero.gd -- --strict 2>&1
+          ) > hero_build.log 2>&1
           rc=$?
           set -e
           echo "--- hero_build.log (rc=$rc) ---"
@@ -184,21 +186,9 @@ jobs:
           echo "--- end log ---"
           if ! grep -q "Hero build OK" hero_build.log; then
             echo "::error::Hero build failed in APK job – aborting export."
-            ls -la "assets/characters/" 2>/dev/null || true
-            ls -la "assets/characters/الشخصية/" 2>/dev/null || echo "no arabic folder"
-            echo "--- imported FBX files ---"
-            find .godot/imported -iname "*fbx*" 2>/dev/null | head -40
             exit 1
           fi
           ls -la assets/models/hero/
-
-      - name: Upload hero build log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: apk-hero-build-log
-          path: hero_build.log
-          if-no-files-found: ignore
       - name: Diagnostics
         run: |
           godot --version
