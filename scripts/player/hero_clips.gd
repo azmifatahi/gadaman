@@ -16,9 +16,13 @@
 extends RefCounted
 
 ## Locomotion clips and the blend value (0..1) at which they become current.
+## The game drives `run_blend` from the track speed as (speed - 9) / 18, so a
+## normal run sits around 0.10-0.30. Idle therefore has to end below that: the
+## runner must be *jogging* for almost the whole session, and the static idle
+## pose is only for menus, pause and the game-over screen.
 const LOCOMOTION := {
-	"idle": 0.0,
-	"jog": 0.55,
+	"idle": 0.10,
+	"jog": 0.80,
 	"sprint": 1.0,
 }
 
@@ -86,12 +90,12 @@ static func classify(file_name: String) -> String:
 	return ""
 
 
-## Locomotion clip for a 0..1 blend value.
+## Locomotion clip for a 0..1 blend value (see LOCOMOTION for the cutoffs).
 static func locomotion_clip(blend: float) -> String:
 	var value := clampf(blend, 0.0, 1.0)
-	if value < 0.35:
+	if value < float(LOCOMOTION["idle"]):
 		return "idle"
-	if value < 0.85:
+	if value < float(LOCOMOTION["jog"]):
 		return "jog"
 	return "sprint"
 
