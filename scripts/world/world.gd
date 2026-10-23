@@ -499,6 +499,11 @@ func _run_screenshot_session() -> void:
 	await get_tree().create_timer(0.4).timeout
 	await _save_shot("03c_buttons")
 	Settings.set_show_buttons(false)
+	# Corniche: the Nile palms. Their alpha fronds are the newest art, so they
+	# get their own capture instead of hiding behind the market.
+	Settings.set_district(2)
+	await get_tree().create_timer(0.9).timeout
+	await _save_shot("03d_corniche")
 	Settings.set_district(-1)
 	await get_tree().create_timer(0.4).timeout
 	player.jump()

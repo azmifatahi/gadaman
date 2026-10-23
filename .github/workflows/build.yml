@@ -498,7 +498,7 @@ jobs:
             godot --rendering-driver opengl3 --resolution 1280x720 -- --screenshot 2>&1 | tee shots.log || true
           # Annotations instead of plain log lines: the raw logs are served from
           # blob storage that some environments cannot reach.
-          grep -aE "SHOT|SCREENSHOTS_DONE|SCRIPT ERROR|Parse Error|ERROR:" shots.log \
+          grep -aE "SHOT|SCREENSHOTS_DONE|Warmup|SCRIPT ERROR|Parse Error|ERROR:" shots.log \
             | tail -n 25 | while IFS= read -r line; do echo "::notice title=shots::${line}"; done
           if ! grep -q "SCREENSHOTS_DONE" shots.log; then
             grep -aE "SCRIPT ERROR|Parse Error|ERROR:|Cannot|Invalid" shots.log | head -n 10 \
