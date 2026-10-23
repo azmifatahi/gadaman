@@ -91,7 +91,7 @@ gadaman/
 │   │   └── game_manager.gd       # حالة الجولة، النقاط، الكومبو، أفضل نتيجة
 │   ├── player/
 │   │   ├── player_controller.gd  # الحارات، القفز، الانحناء، السحب/الإمالة
-│   │   ├── player_animation_handler.gd # ربط الإشارات بـ AnimationTree
+│   │   ├── player_animation_handler.gd # تشغيل مقاطع الـ AnimationPlayer
 │   │   ├── hero_material.gd      # بدلة العلم (Material آمن على gl_compatibility)
 │   │   └── runner_model.gd       # نموذج احتياطي إجرائي (يظهر دائمًا)
 │   ├── world/
@@ -324,6 +324,6 @@ pip install "gdtoolkit>=4,<5" && for f in $(find scripts -name '*.gd'); do gdpar
 ### ترقية الرسومات الواقعية / Semi-realistic art upgrade
 
 راجع [`docs/ASSET_IMPORT_GUIDE.md`](docs/ASSET_IMPORT_GUIDE.md) لخطوات Mixamo/GLB
-والـAnimationTree وتراخيص Poly Pizza/Sketchfab. يمكن تشغيل
+وتشغيل مقاطع الحركة (AnimationPlayer) وتراخيص Poly Pizza/Sketchfab. يمكن تشغيل
 `scripts/tools/SetupRealisticRunner.gd` من محرر Godot بعد تحديد نموذج البطل لتطبيق
 بدلة السودان المعدنية وReflectionProbe تلقائياً.

@@ -11,7 +11,7 @@
 ##    * Hero/AnimationPlayer . canonical clips: idle / jog / sprint / jump /
 ##                              fall / land / slide / stumble, with every track
 ##                              RETARGETED onto Hero/Mesh's skeleton
-##    * Hero/AnimationTree ... StateMachine + BlendSpace1D (run blend)
+##    * Hero/AnimationPlayer ... retargeted clips (idle/jog/sprint + one-shots)
 ##
 ##  Three rules keep this honest (all of them were broken before v1.2.2 and the
 ##  result was an invisible runner in the shipped APK):
@@ -55,7 +55,7 @@ const HERO_REPORT_PATH := HERO_DIR + "hero_report.txt"
 ## Shared animation graph/classification: the same code builds the tree offline
 ## (here) and repairs it at runtime (player_animation_handler.gd), so the two
 ## can never drift apart.
-const ANIM_GRAPH := preload("res://scripts/player/hero_animation_graph.gd")
+const HeroClips := preload("res://scripts/player/hero_clips.gd")
 
 ## Final on-screen height of the runner, in metres.
 const TARGET_HEIGHT := 1.78
@@ -65,44 +65,7 @@ const MAX_HEIGHT := 2.4
 const MIN_VERTICES := 200
 const MIN_BONES := 10
 
-## Exact file-name -> canonical clip. Names are lower-case, spaces collapsed.
-## Anything not listed falls back to the needle rules below, so renamed exports
-## (e.g. "mixamo.com_Jog.fbx") still land in the right slot.
-const NAME_TO_CLIP := {
-	"run forward": "jog",
-	"running": "jog",
-	"run": "jog",
-	"jog": "jog",
-	"jogging": "jog",
-	"jump": "jump",
-	"jumping": "jump",
-	"falling to landing": "fall",
-	"falling": "fall",
-	"fall": "fall",
-	"landing": "land",
-	"land": "land",
-	"running slide": "slide",
-	"slide": "slide",
-	"sliding": "slide",
-	"jogging stumble": "stumble",
-	"stumble": "stumble",
-	"idle": "idle",
-}
-
-const ANIM_RULES := [
-	{"key": "stumble", "needle": "stumble", "loop": false},
-	{"key": "slide", "needle": "slide", "loop": false},
-	{"key": "land", "needle": "landing", "loop": false},
-	{"key": "land", "needle": "land", "loop": false},
-	{"key": "jump", "needle": "jump", "loop": false},
-	{"key": "fall", "needle": "fall", "loop": false},
-	{"key": "idle", "needle": "idle", "loop": true},
-	{"key": "sprint", "needle": "sprint", "loop": true},
-	{"key": "jog", "needle": "run", "loop": true},
-	{"key": "jog", "needle": "jog", "loop": true},
-]
-
-## Clips the AnimationTree needs. `land` and `idle`/`sprint` may be synthesised.
+## Clips the game needs. `land` and `idle`/`sprint` may be synthesised.
 const REQUIRED_CLIPS := ["jog", "jump", "fall", "land", "slide", "stumble"]
 
 const LOOP_CLIPS := ["idle", "jog", "sprint"]
@@ -132,7 +95,7 @@ static func build_if_missing() -> bool:
 
 ## Verifies the shipped hero scene end-to-end. Returns a plain Dictionary so it
 ## can be printed / JSON-ified by CI:
-##   { ok, meshes, vertices, bones, height, feet, clips, problems[] }
+##   { ok, meshes, vertices, bones, height, feet, clips, motion, problems[] }
 static func verify(path := HERO_SCENE_PATH) -> Dictionary:
 	var b := HeroBuilder.new()
 	return b._do_verify(path)
@@ -245,6 +208,11 @@ func _do_build(strict := false) -> bool:
 	if not lib.has_animation("jog"):
 		_harvest_node(mesh_root, "jog", lib, hero, skeleton)
 
+	# The imported AnimationPlayer is only a data source: its clips are copied
+	# (and retargeted) into our own player above. Remove it so the scene has
+	# exactly one player and nothing can fight over the skeleton.
+	_strip_imported_players(mesh_root)
+
 	_make_canonical(lib)
 	_apply_loops(lib)
 	_print_library(lib)
@@ -270,22 +238,10 @@ func _do_build(strict := false) -> bool:
 		fit["aabb"], float(fit["height"]), float(fit["scale"]),
 		float(fit["feet"]), rad_to_deg(float(fit["yaw"])), int(fit["meshes"])])
 
-	# -- 7. AnimationTree on top of the retargeted clips ----------------------
-	var tree := AnimationTree.new()
-	tree.name = "AnimationTree"
-	tree.anim_player = NodePath("../AnimationPlayer")
-	tree.tree_root = ANIM_GRAPH.build(anim_player)
-	tree.active = true
-	hero.add_child(tree, true)
-
-	# -- 8. OWNERSHIP: without this PackedScene.pack() saves an EMPTY scene ---
+	# -- 7. OWNERSHIP: without this PackedScene.pack() saves an EMPTY scene ---
 	_own_tree(hero)
 	hero.visible = true
 	mesh_root.visible = true
-
-	print("[HeroBuilder] tree_root before pack: %s" % (
-		hero.get_node("AnimationTree").tree_root.get_class() \
-		if (hero.get_node("AnimationTree") as AnimationTree).tree_root != null else "<null>"))
 
 	var pck := PackedScene.new()
 	var err := pck.pack(hero)
@@ -300,7 +256,7 @@ func _do_build(strict := false) -> bool:
 		_issue("Saving %s failed: %s" % [HERO_SCENE_PATH, error_string(err)], strict)
 		return false
 
-	# -- 9. Read it back and prove it is drawable -----------------------------
+	# -- 8. Read it back and prove it is drawable -----------------------------
 	var report := _do_verify(HERO_SCENE_PATH)
 	_write_report(report)
 	if not bool(report.get("ok", false)):
@@ -365,23 +321,20 @@ func _list_assets(folder: String) -> Array[String]:
 
 ## Canonical clip key for a file name ("" when it is only the skin).
 func _classify(file_name: String) -> String:
-	var base := file_name.get_basename().to_lower()
-	for ch in ["_", "-", "."]:
-		base = base.replace(ch, " ")
-	base = base.strip_edges()
-	while base.contains("  "):
-		base = base.replace("  ", " ")
-	if NAME_TO_CLIP.has(base):
-		return String(NAME_TO_CLIP[base])
-	for rule in ANIM_RULES:
-		var needle := String(rule["needle"])
-		if needle == "run" and base.contains("slide"):
-			continue
-		if needle == "jump" and base.contains("stumble"):
-			continue
-		if base.contains(needle):
-			return String(rule["key"])
-	return ""
+	return HeroClips.classify(file_name)
+
+
+## Deletes the AnimationPlayer(s) that came in with the FBX scene. Their clips
+## were already retargeted into the hero's own player.
+func _strip_imported_players(root: Node) -> void:
+	var found: Array[Node] = []
+	for node in _nodes_of_type(root, "AnimationPlayer"):
+		if node != root:
+			found.append(node)
+	for node in found:
+		print("[HeroBuilder] removed imported animation player '%s'" % String(node.name))
+		node.get_parent().remove_child(node)
+		node.free()
 
 
 func _safe_load_scene(path: String) -> PackedScene:
@@ -505,6 +458,7 @@ func _harvest_node(root: Node, key: String, lib: AnimationLibrary,
 	var best: Animation = null
 	var best_name := ""
 	var best_tracks := 0
+	var best_motion := -1
 	for node in _nodes_of_type(root, "AnimationPlayer"):
 		var ap := node as AnimationPlayer
 		if ap == null:
@@ -520,16 +474,57 @@ func _harvest_node(root: Node, key: String, lib: AnimationLibrary,
 				var dup := src.duplicate() as Animation
 				if dup == null:
 					continue
+				# Pick by how much the clip MOVES, not by how many tracks it has:
+				# Mixamo FBX exports contain "Take 001" (a full-length static
+				# bind-pose take, 53 tracks, 0 movement) next to "mixamo.com"
+				# (the real motion). Choosing on track count alone shipped that
+				# static take as the run cycle and left the runner in a T-pose.
+				var motion := _motion_score(src)
 				var kept := _retarget(dup, ap, hero, skel, skin_root)
-				if kept > best_tracks:
+				if motion > best_motion or (motion == best_motion and kept > best_tracks):
+					best_motion = motion
 					best_tracks = kept
 					best = dup
 					best_name = String(anim_name)
 	if best == null or best_tracks <= 0:
 		return 0
 	_put_anim(lib, key, best)
-	print("[HeroBuilder] clip '%s' <- '%s' (%d tracks)" % [key, best_name, best_tracks])
+	print("[HeroBuilder] clip '%s' <- '%s' (%d tracks, motion score %d)" % [
+		key, best_name, best_tracks, best_motion])
 	return best_tracks
+
+
+## How much a clip actually moves: counts keyed tracks and weights the ones whose
+## values change over time. A T-pose take scores ~0, a real animation scores high.
+func _motion_score(anim: Animation) -> int:
+	var score := 0
+	for t in range(anim.get_track_count()):
+		var keys := anim.track_get_key_count(t)
+		if keys <= 0:
+			continue
+		if keys == 1:
+			score += 1
+			continue
+		var first: Variant = anim.track_get_key_value(t, 0)
+		var varies := false
+		# Sampling keeps the check cheap on 30k-key clips.
+		var step: int = maxi(1, keys / 8)
+		for k in range(step, keys, step):
+			if not _variant_close(anim.track_get_key_value(t, k), first):
+				varies = true
+				break
+		score += 4 if varies else 1
+	return score
+
+
+func _variant_close(a: Variant, b: Variant) -> bool:
+	if a is Quaternion and b is Quaternion:
+		return absf((a as Quaternion).dot(b as Quaternion)) > 0.99999
+	if a is Vector3 and b is Vector3:
+		return (a as Vector3).distance_to(b as Vector3) < 0.0005
+	if a is float and b is float:
+		return absf(float(a) - float(b)) < 0.0005
+	return a == b
 
 
 ## Rewrites every track path of `anim` so it resolves inside the hero tree.
@@ -956,7 +951,6 @@ func _do_verify(path: String) -> Dictionary:
 		"feet": 0.0,
 		"bone_span": 0.0,
 		"clips": {},
-		"tree_root": "",
 		"motion": {},
 		"problems": [],
 		"warnings": [],
@@ -1037,15 +1031,15 @@ func _do_verify(path: String) -> Dictionary:
 			key, float(m["length"]), int(m["tracks"]), int(m["moved"]), int(m["bones"])])
 		if bool(m["playable"]) and int(m["moved"]) <= 0:
 			problems.append("clip '%s' plays but moves 0 bones (skeleton would stay in its T-pose)" % key)
-	var anim_tree := _find_first_animation_tree(inst)
+	# The game drives the AnimationPlayer directly; an AnimationTree is optional
+	# and must never gate drawability (a tree with a null root silently wins over
+	# the player and freezes the pose — that was v1.2.2's T-pose).
 	var warnings: Array = report["warnings"]
-	if anim_tree == null:
-		warnings.append("no AnimationTree in the scene (AnimationPlayer fallback will be used)")
-	else:
-		var root = anim_tree.tree_root
-		report["tree_root"] = root.get_class() if root != null else ""
-		if root == null:
-			warnings.append("AnimationTree.tree_root is empty (AnimationPlayer fallback will be used)")
+	var strays := 0
+	for node in inst.find_children("*", "AnimationTree", true, false):
+		strays += 1
+	if strays > 0:
+		warnings.append("%d AnimationTree node(s) present; the game ignores them" % strays)
 
 	if meshes <= 0:
 		problems.append("hero has no mesh at all (empty scene)")
@@ -1130,15 +1124,6 @@ func _find_first_animation_player(root: Node) -> AnimationPlayer:
 		return preferred
 	for node in root.find_children("*", "AnimationPlayer", true, false):
 		return node as AnimationPlayer
-	return null
-
-
-func _find_first_animation_tree(root: Node) -> AnimationTree:
-	var preferred := root.get_node_or_null("AnimationTree") as AnimationTree
-	if preferred != null:
-		return preferred
-	for node in root.find_children("*", "AnimationTree", true, false):
-		return node as AnimationTree
 	return null
 
 

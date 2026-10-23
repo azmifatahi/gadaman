@@ -5,10 +5,11 @@ extends SceneTree
 ##  tools/ci_verify_hero.gd proves the generated scene has geometry, bones and
 ##  resolvable animation tracks. It cannot prove that something *drives* those
 ##  tracks at runtime — v1.2.2 shipped a scene that passed every data check and
-##  still stood in a T-pose, because `AnimationTree.tree_root` was empty.
+##  still stood in a T-pose (the run cycle had been taken from Mixamo's static
+##  "Take 001" stack, and the saved AnimationTree had no root).
 ##
 ##  This probe therefore reproduces the real runtime wiring:
-##     Player(Node3D) ── "Model" (hero.tscn) ── AnimationPlayer / AnimationTree
+##     Player(Node3D) ── "Model" (hero.tscn) ── AnimationPlayer
 ##                     └─ AnimationHandler (scripts/player/player_animation_handler.gd)
 ##  then lets the handler run for a few frames and compares skeleton poses.
 ##  A frozen skeleton means the character is not animated, and this exits 1.
@@ -24,7 +25,6 @@ var _hero: Node3D
 var _handler: Node
 var _skeleton: Skeleton3D
 var _ap: AnimationPlayer
-var _tree: AnimationTree
 var _frame := 0
 var _before: Array = []
 var _strict := false
@@ -56,7 +56,6 @@ func _initialize() -> void:
 
 	_skeleton = _find_skeleton(_hero)
 	_ap = _hero.get_node_or_null("AnimationPlayer") as AnimationPlayer
-	_tree = _hero.get_node_or_null("AnimationTree") as AnimationTree
 
 	print("[HeroProbe] hero children: %s" % _names(_hero.get_children()))
 	print("[HeroProbe] skeleton=%s bones=%d" % [
@@ -64,9 +63,6 @@ func _initialize() -> void:
 		_skeleton.get_bone_count() if _skeleton != null else 0])
 	print("[HeroProbe] clips=%s" % [
 		_ap.get_animation_list() if _ap != null else PackedStringArray()])
-	print("[HeroProbe] saved AnimationTree: active=%s tree_root=%s" % [
-		_tree.active if _tree != null else false,
-		_tree.tree_root.get_class() if _tree != null and _tree.tree_root != null else "<null>"])
 
 	if _skeleton == null or _ap == null:
 		_fail("missing skeleton / AnimationPlayer")
@@ -83,12 +79,10 @@ func _initialize() -> void:
 	_player.add_child(_handler)
 	_handler.call("bind_player", _player)
 
-	var mode: int = _handler.get("_mode")
-	print("[HeroProbe] handler mode=%d (%s) tree_root=%s" % [
-		mode, "TREE" if mode == 1 else ("PLAYER" if mode == 2 else "NONE"),
-		_tree.tree_root.get_class() if _tree != null and _tree.tree_root != null else "<null>"])
-	if mode == 0:
-		_fail("handler could not find any animation back-end")
+	var clip: String = String(_handler.get("_clip"))
+	print("[HeroProbe] handler clip='%s'" % clip)
+	if clip.is_empty():
+		_fail("handler could not start any clip")
 		return
 
 	# Ask for a jog cycle so a real run clip is sampled.
@@ -97,12 +91,12 @@ func _initialize() -> void:
 	print("[HeroProbe] requested jog (blend 0.6)")
 
 	# Deep diagnostics: does the clip data actually address this skeleton?
-	for clip in ["jog", "jump"]:
-		if not _ap.has_animation(clip):
+	for clip_name in ["jog", "jump"]:
+		if not _ap.has_animation(clip_name):
 			continue
-		var anim := _ap.get_animation(clip)
+		var anim := _ap.get_animation(clip_name)
 		print("[HeroProbe] clip '%s': length=%.3f loop=%d tracks=%d" % [
-			clip, anim.length, anim.loop_mode, anim.get_track_count()])
+			clip_name, anim.length, anim.loop_mode, anim.get_track_count()])
 		for t in range(mini(4, anim.get_track_count())):
 			var path := anim.track_get_path(t)
 			var node := _hero.get_node_or_null(NodePath(path.get_concatenated_names()))

@@ -428,10 +428,12 @@ jobs:
           cp hero_probe.log docs/hero_runtime.txt 2>/dev/null || true
           # Small slice of the generated scene for debugging serialization.
           {
-            echo "== AnimationTree block =="
-            grep -n -A 8 'type="AnimationTree"' assets/models/hero/hero.tscn | head -n 30 || true
-            echo "== tree_root lines =="
-            grep -n 'tree_root' assets/models/hero/hero.tscn | head -n 10 || true
+            echo "== AnimationPlayer block =="
+            grep -n -A 6 'type="AnimationPlayer"' assets/models/hero/hero.tscn | head -n 20 || true
+            echo "== AnimationTree nodes (should be none) =="
+            grep -n 'type="AnimationTree"' assets/models/hero/hero.tscn | head -n 5 || true
+            echo "== first clip tracks =="
+            grep -n 'tracks/[0-9]*/path' assets/models/hero/hero.tscn | head -n 6 || true
             echo "== sub_resources: $(grep -c '^\[sub_resource' assets/models/hero/hero.tscn || true)"
             echo "== ext_resources =="
             grep -n '^\[ext_resource' assets/models/hero/hero.tscn | head -n 10 || true

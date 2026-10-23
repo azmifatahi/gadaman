@@ -14,7 +14,7 @@
 ##
 ## This controller supports two visual back-ends:
 ##   1. The imported Mixamo hero (res://assets/models/hero/hero.tscn) — uses an
-##      AnimationTree with run_blend/lane_blend and one-shots driven by
+##      AnimationPlayer with run_blend/lane_blend and one-shots driven by
 ##      PlayerAnimationHandler.
 ##   2. The legacy procedural RunnerModel — used as a graceful fallback if the
 ##      hero scene hasn't been imported yet (e.g. in CI headless runs).
@@ -72,11 +72,10 @@ var _invulnerability_timer := 0.0
 var _last_intensity := -1.0
 
 # Visual back-end references. Either _procedural (RunnerModel) is populated or
-# _hero + _anim_player + _anim_tree + _anim_handler are; both paths work.
+# _hero + _anim_player + _anim_handler are; both paths work.
 var _model: RunnerModel
 var _hero: Node3D
 var _anim_player: AnimationPlayer
-var _anim_tree: AnimationTree
 var _anim_handler: Node
 var _blob: MeshInstance3D
 var _using_imported_hero: bool = false
@@ -111,10 +110,7 @@ func _attach_model() -> void:
 				add_child(hero_root)
 				_hero = hero_root
 				_anim_player = _hero.get_node_or_null("AnimationPlayer") as AnimationPlayer
-				_anim_tree = _hero.get_node_or_null("AnimationTree") as AnimationTree
 				_using_imported_hero = true
-				if _anim_tree:
-					_anim_tree.active = true
 				print("[PlayerController] hero.tscn attached (meshes=%d, bones=%d, %.2f m tall)" % [
 					_count_visible_meshes(_hero), _count_bones(_hero), _hero_height(_hero)])
 				return
@@ -247,11 +243,10 @@ func reset() -> void:
 	if _model:
 		_model.set_state(RunnerModel.State.RUN)
 		_model.reset_pose()
-	# Never call AnimationPlayer.play() on a player driven by an AnimationTree:
-	# the tree owns playback, a direct play() is overwritten (or freezes the
-	# pose). The handler picks the right back-end, so just ask it for idle.
+	# The handler owns playback: never call AnimationPlayer.play() here, or the
+	# reset would fight the locomotion cross-fade on the same skeleton.
 	if _using_imported_hero:
-		_reset_tree_oneshots()
+		_reset_animation_state()
 	if _blob:
 		_blob.visible = true
 	if Settings.tilt_enabled:
@@ -333,8 +328,8 @@ func _physics_process(delta: float) -> void:
 	run_blend = move_toward(run_blend, clampf((spd - 9.0) / 18.0, 0.0, 1.0), delta * 2.8)
 	if _model:
 		_model.animate(delta, spd, is_sliding, is_airborne)
-	# Drive the imported hero: AnimationTree when available, otherwise the
-	# handler drives the AnimationPlayer directly.
+	# Drive the imported hero: the handler owns the AnimationPlayer (there is
+	# deliberately no AnimationTree — see player_animation_handler.gd).
 	if _anim_handler and _anim_handler.has_method("set_run_blend"):
 		_anim_handler.set_run_blend(run_blend)
 	if _anim_handler and _anim_handler.has_method("tick"):
@@ -361,10 +356,6 @@ func animation_debug() -> String:
 		lines.append("anim_player clip='%s' playing=%s t=%.3f speed=%.2f" % [
 			String(_anim_player.current_animation), _anim_player.is_playing(),
 			_anim_player.get_current_animation_position(), _anim_player.speed_scale])
-	if _anim_tree != null:
-		lines.append("anim_tree active=%s root=%s" % [
-			_anim_tree.active,
-			_anim_tree.tree_root.get_class() if _anim_tree.tree_root != null else "<null>"])
 	if _anim_handler != null and _anim_handler.has_method("debug_state"):
 		lines.append(String(_anim_handler.call("debug_state")))
 	var skel: Skeleton3D = null
@@ -381,7 +372,7 @@ func animation_debug() -> String:
 	return "\n".join(lines)
 
 
-func _reset_tree_oneshots() -> void:
+func _reset_animation_state() -> void:
 	if _anim_handler and _anim_handler.has_method("fire"):
 		_anim_handler.fire("recover")
 

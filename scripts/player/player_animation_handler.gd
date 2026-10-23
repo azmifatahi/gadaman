@@ -1,38 +1,35 @@
-## Bridges PlayerController signals to the generated hero's animation.
+## Drives the imported Mixamo hero.
 ##
-## Two back-ends, picked at runtime:
-##   * TREE   — the AnimationTree saved inside hero.tscn (StateMachine >
-##              BlendTree > BlendSpace1D "locomotion"). Preferred: it blends
-##              idle/jog/sprint smoothly by speed.
-##   * PLAYER — the plain AnimationPlayer. Used automatically when the
-##              AnimationTree has no usable tree root, so a hero can never end up
-##              frozen in its T-pose because of one bad resource.
+## Design rule: **the AnimationPlayer is the only animation back-end.** No
+## `AnimationTree` is created at runtime or saved into the hero scene. That is
+## deliberate — v1.2.2 crashed into a T-pose because the saved `AnimationTree` lost
+## its `tree_root` (nested `AnimationNode*` graphs do not always survive
+## `PackedScene.pack()`), and an empty tree silently outranks a perfectly good
+## AnimationPlayer. The clips themselves were verified to animate (playing
+## `mixamo_com` from `Run Forward.fbx` moves 51 of 65 bones), so the safest thing
+## to ship is: play those clips, nothing in between.
 ##
-## Parameter paths are discovered once from the actual tree layout; the handler
-## never calls AnimationTree.set() with a guessed path (invalid paths print an
-## engine error every frame).
+## Locomotion is cross-faded between idle / jog / sprint on speed; one-shots
+## (jump, fall, land, slide, stumble) play once and hand control back.
 class_name PlayerAnimationHandler
 extends Node
 
-enum Mode { NONE, TREE, PLAYER }
+const HeroClips := preload("res://scripts/player/hero_clips.gd")
 
-const HeroAnimationGraph := preload("res://scripts/player/hero_animation_graph.gd")
-const LOCOMOTION_STATES := ["idle", "jog", "sprint"]
-const ONE_SHOTS := ["jump", "fall", "land", "slide", "stumble"]
+## Where the hero scene is mounted inside the player (PlayerController names it
+## "Model").
+const MODEL_PATH := ^"Model"
 
 var _player_node: Node3D
-var _tree: AnimationTree
 var _ap: AnimationPlayer
-var _state_machine: AnimationNodeStateMachinePlayback
-var _blend_path: String = ""
-var _mode: int = Mode.NONE
-var _current: String = ""
 var _blend: float = 0.0
+var _clip: String = ""
+var _locked: bool = false          # a one-shot owns the skeleton right now
 
 
 func _ready() -> void:
-	# PlayerController owns the player signals and calls fire(); binding here
-	# only makes the handler usable stand-alone (e.g. in tools/ci_hero_probe.gd).
+	# PlayerController owns gameplay signals and calls fire(); binding here also
+	# makes the handler usable stand-alone (tools/ci_hero_probe.gd does that).
 	bind_player(get_parent())
 
 
@@ -41,124 +38,98 @@ func bind_player(p: Node) -> void:
 	_refresh()
 
 
-## Resolves the back-end and the run-blend parameter path from the real layout.
 func _refresh() -> void:
-	_state_machine = null
-	_blend_path = ""
-	_mode = Mode.NONE
+	_ap = null
 	if _player_node == null:
 		return
-	_tree = _player_node.get_node_or_null("Model/AnimationTree") as AnimationTree
-	_ap = _player_node.get_node_or_null("Model/AnimationPlayer") as AnimationPlayer
-	# A saved scene can lose `tree_root` (nested resource graphs do not always
-	# survive PackedScene.pack()); rebuild it from the clips on hand instead of
-	# leaving the runner frozen in its T-pose.
-	if _tree != null and not (_tree.tree_root is AnimationNodeStateMachine):
-		if HeroAnimationGraph.can_build(_ap):
-			_tree.tree_root = HeroAnimationGraph.build(_ap)
-			print("[PlayerAnimationHandler] rebuilt AnimationTree root at runtime (%s)" % _tree.tree_root.resource_name)
-	if _tree != null and _tree.tree_root is AnimationNodeStateMachine:
-		_tree.active = true
-		_state_machine = _tree.get("parameters/playback") as AnimationNodeStateMachinePlayback
-		if _state_machine != null:
-			_mode = Mode.TREE
-			_discover_blend_path()
-	if _mode == Mode.NONE:
-		# No usable tree (e.g. tree_root was lost when the scene was saved):
-		# drive the AnimationPlayer directly instead of standing still.
-		if _tree != null:
-			_tree.active = false
-		if _ap != null and _ap.has_animation("jog"):
-			_mode = Mode.PLAYER
-			_ap.play(_locomotion_clip(), 0.0)
-			_current = _locomotion_clip()
-	if _ap != null and not _ap.animation_finished.is_connected(_on_animation_finished):
+	var model := _player_node.get_node_or_null(MODEL_PATH)
+	if model == null:
+		return
+	_ap = model.get_node_or_null("AnimationPlayer") as AnimationPlayer
+	if _ap == null:
+		# Tolerate a renamed/relocated player: take the first one in the hero.
+		for node in model.find_children("*", "AnimationPlayer", true, false):
+			_ap = node as AnimationPlayer
+			break
+	if _ap == null:
+		push_warning("[PlayerAnimationHandler] the hero has no AnimationPlayer")
+		return
+	if not _ap.animation_finished.is_connected(_on_animation_finished):
 		_ap.animation_finished.connect(_on_animation_finished)
-
-
-func debug_state() -> String:
-	return "handler mode=%d blend=%.2f blend_path='%s' current='%s' state='%s'" % [
-		_mode, _blend, _blend_path, _current,
-		_state_machine.get_current_node() if _state_machine != null else "-"]
-
-
-func _discover_blend_path() -> void:
-	var root := _tree.tree_root
-	if not (root is AnimationNodeStateMachine):
-		return
-	var sm := root as AnimationNodeStateMachine
-	if not sm.has_node("locomotion"):
-		return
-	var loco := sm.get_node("locomotion")
-	if loco is AnimationNodeBlendTree and (loco as AnimationNodeBlendTree).has_node("locomotion"):
-		_blend_path = HeroAnimationGraph.BLEND_PATH
+	_clip = ""
+	_locked = false
+	_play(HeroClips.locomotion_clip(_blend), true)
 
 
 ## 0 = idle, 0.55 = jog, 1 = sprint.
 func set_run_blend(value: float) -> void:
 	_blend = clampf(value, 0.0, 1.0)
-	match _mode:
-		Mode.TREE:
-			if not _blend_path.is_empty():
-				_tree.set(_blend_path, _blend)
-		Mode.PLAYER:
-			if LOCOMOTION_STATES.has(_current):
-				_play_player(_locomotion_clip(), 0.25)
-
-
-func _locomotion_clip() -> String:
-	if _blend < 0.12:
-		return "idle"
-	if _blend > 0.85:
-		return "sprint"
-	return "jog"
-
-
-func _travel(state: String) -> void:
-	match _mode:
-		Mode.TREE:
-			if _state_machine != null and _state_machine.get_current_node() != state:
-				_state_machine.travel(state)
-		Mode.PLAYER:
-			if state == "locomotion":
-				_play_player(_locomotion_clip(), 0.15)
-			else:
-				_play_player(state, 0.10, true)
-
-
-func _play_player(clip: String, fade: float, restart: bool = false) -> void:
-	if _ap == null or not _ap.has_animation(clip):
+	if _ap == null or _locked:
 		return
-	if not restart and _current == clip and _ap.is_playing():
-		return
-	_ap.play(clip, fade)
-	_current = clip
+	var wanted := HeroClips.locomotion_clip(_blend)
+	if wanted != _clip:
+		_play(wanted)
 
 
-func fire(action: String) -> void:
-	match action:
-		"jump", "fall", "land", "slide", "stumble":
-			_travel(action)
-		"recover", "idle", "run", "locomotion":
-			_travel("locomotion")
-		_:
-			# Unknown one-shots (crash / smash) have no dedicated clip.
-			pass
-
-
+## Called every physics frame by PlayerController. Keeps the locomotion clip in
+## sync when playing it was skipped (e.g. the AnimationPlayer was re-bound).
 func tick(_delta: float, sliding: bool, airborne: bool, stumbling: bool) -> void:
-	if _mode != Mode.PLAYER:
+	if _ap == null or _locked:
 		return
-	# One-shots win; otherwise keep the right locomotion clip for the speed.
-	if airborne or sliding or stumbling:
+	if sliding or airborne or stumbling:
 		return
-	if not LOCOMOTION_STATES.has(_current):
+	var wanted := HeroClips.locomotion_clip(_blend)
+	if _clip != wanted or not _ap.is_playing():
+		_play(wanted)
+
+
+## Plays a one-shot action ("jump", "fall", "land", "slide", "stumble",
+## "recover").
+func fire(action: String) -> void:
+	if _ap == null:
 		return
-	_play_player(_locomotion_clip(), 0.25)
+	match action:
+		"recover", "idle", "run", "locomotion":
+			_locked = false
+			_play(HeroClips.locomotion_clip(_blend))
+		"crash":
+			# No crash clip in the character folder: hold the stumble pose.
+			_play_once("stumble")
+		_:
+			if HeroClips.ONE_SHOTS.has(action):
+				_play_once(action)
+
+
+func _play_once(clip: String) -> void:
+	if not _has(clip):
+		return
+	_locked = true
+	_play(clip)
+	# A looping clip would never emit animation_finished: never lock on those.
+	if _ap.get_animation(clip).loop_mode != Animation.LOOP_NONE:
+		_locked = false
+
+
+func _play(clip: String, restart: bool = false) -> void:
+	if _ap == null or not _has(clip):
+		return
+	if not restart and _clip == clip and _ap.is_playing():
+		return
+	_ap.play(clip, HeroClips.fade_time(clip))
+	_clip = clip
+
+
+func _has(clip: String) -> bool:
+	return _ap != null and not clip.is_empty() and _ap.has_animation(clip)
 
 
 func _on_animation_finished(anim_name: StringName) -> void:
-	if _mode != Mode.PLAYER:
-		return
-	if ONE_SHOTS.has(String(anim_name)):
-		_play_player(_locomotion_clip(), 0.2)
+	if HeroClips.ONE_SHOTS.has(String(anim_name)):
+		_locked = false
+		_play(HeroClips.locomotion_clip(_blend), true)
+
+
+## Compact state line published by the CI screenshot session.
+func debug_state() -> String:
+	return "handler clip='%s' blend=%.2f locked=%s playing=%s" % [
+		_clip, _blend, _locked, _ap != null and _ap.is_playing()]
