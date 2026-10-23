@@ -15,5 +15,9 @@
   "ok": true,
   "path": "res://assets/models/hero/hero.tscn",
   "problems": [],
-  "vertices": 28374
+  "tree_root": "",
+  "vertices": 28374,
+  "warnings": [
+    "AnimationTree.tree_root is empty (AnimationPlayer fallback will be used)"
+  ]
 }
