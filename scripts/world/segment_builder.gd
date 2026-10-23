@@ -621,11 +621,15 @@ static func _palm(st: SurfaceTool, leaf_st: SurfaceTool, base: Vector3,
 	MeshKit.add_cylinder(st, base, 0.2, h, Color("#6f5940"), 6, 0.13)
 	MeshKit.add_cylinder(st, top - Vector3(0, 0.5, 0), 0.42, 0.55,
 			Color("#4a3a28"), 6)
+	# Fibrous crown core: without it the fronds radiate from thin air and the
+	# crown reads as a spider rather than a palm.
+	MeshKit.add_cylinder(st, top - Vector3(0, 0.9, 0), 0.34, 0.55,
+			Color("#6b5a3a"), 7)
 	# 13 textured fronds per crown. Each one is a single quad running from the
 	# crown to the tip, mapped 0..1 across `palm_frond.png` - the texture carries
 	# the leaflets, so the silhouette is a palm instead of a green shard.
-	for i in 13:
-		var a := TAU * float(i) / 13.0 + rng.randf_range(-0.16, 0.16)
+	for i in 16:
+		var a := TAU * float(i) / 16.0 + rng.randf_range(-0.16, 0.16)
 		var dir := Vector3(cos(a), 0, sin(a))
 		var reach := rng.randf_range(2.1, 2.9)
 		# Younger fronds stand up, older ones droop: the crown has a profile.
@@ -633,7 +637,7 @@ static func _palm(st: SurfaceTool, leaf_st: SurfaceTool, base: Vector3,
 		var droop := rng.randf_range(0.6, 1.5)
 		var root: Vector3 = top + dir * 0.18 + Vector3(0, lift, 0)
 		var tip: Vector3 = top + dir * reach + Vector3(0, lift - droop, 0)
-		var perp := Vector3(-dir.z, 0.0, dir.x) * rng.randf_range(0.30, 0.42)
+		var perp := Vector3(-dir.z, 0.0, dir.x) * rng.randf_range(0.40, 0.56)
 		var shade := rng.randf_range(0.72, 1.0)
 		var tint := Color(shade, shade * 1.04, shade * 0.88)
 		MeshKit.add_quad(leaf_st, root - perp, tip - perp * 0.55,

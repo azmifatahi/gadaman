@@ -576,7 +576,7 @@ def build_frond() -> None:
         x = rib_x(t)
         y = rib_y(t)
         env = math.sin(math.pi * min(1.0, 0.06 + t * 0.98)) ** 0.55
-        length = (52.0 * env * (1.0 - 0.28 * t) + 6.0) * ss
+        length = (56.0 * env * (1.0 - 0.24 * t) + 8.0) * ss
         sweep = math.radians(34.0 + 26.0 * t)          # forward rake
         for side in (-1.0, 1.0):
             ang = math.radians(90.0) * side - math.pi * 0.0
@@ -586,7 +586,7 @@ def build_frond() -> None:
             dy = math.sin(ang) * 1.0
             tip_x = x + dx * length
             tip_y = y + dy * length * 0.62
-            base_w = (2.6 + 2.0 * env) * ss
+            base_w = (4.6 + 3.4 * env) * ss
             # A tapered quad: two base points either side of the rib, one tip.
             nx, ny = -dy, dx
             shade = 0.82 + rng.random() * 0.30
