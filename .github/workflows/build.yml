@@ -160,17 +160,23 @@ jobs:
 
       - name: Import project (native ufbx FBX importer, Godot 4.4)
         run: |
-          godot --headless --import 2>&1 | tail -n 20
+          # First pass registers the FBX files with the ufbx importer.
+          godot --headless --import 2>&1 | tail -n 40
+          # Second pass reimports any deferred assets (animations, meshes).
           godot --headless --import 2>&1 | tail -n 10
+          # Dump what Godot now sees inside the Arabic folder so the logs show
+          # us exactly which FBX files produced usable PackedScenes.
+          echo "--- .godot/imported (FBX-related) ---"
+          find .godot/imported -iname "*run*" -o -iname "*jump*" -o -iname "*slide*" -o -iname "*stumble*" -o -iname "*fall*" -o -iname "*land*" 2>/dev/null | head -20
 
       - name: Build hero scene from Arabic FBX folder (STRICT)
         timeout-minutes: 5
         run: |
-          # Strict mode: if hero.tscn isn't produced the APK job FAILS.
-          # We NEVER ship a blocky-capsule fallback APK anymore.
-          godot --headless -v --script tools/ci_build_hero.gd -- --strict 2>&1 | tee hero_build.log | tail -n 80
+          godot --headless -v --script tools/ci_build_hero.gd -- --strict 2>&1 | tee hero_build.log | tail -n 120
           if ! grep -q "Hero build OK" hero_build.log; then
             echo "::error::Hero build failed in APK job – aborting export."
+            echo "--- last 80 lines of hero_build.log ---"
+            tail -n 80 hero_build.log
             exit 1
           fi
           ls -la assets/models/hero/
