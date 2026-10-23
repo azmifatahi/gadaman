@@ -38,6 +38,31 @@ jobs:
           use-dotnet: false
           include-templates: true
 
+      - name: Install FBX2glTF (required by Godot's FBX importer)
+        run: |
+          # Godot 4's FBX importer shells out to FBX2glTF; without it on PATH
+          # the importer hangs waiting for the binary and the headless hero
+          # build never completes. We grab the official release and put it
+          # on PATH so .fbx imports work in headless mode.
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o /tmp/fbx2gltf.zip \
+            "https://github.com/nicedoc/FBX2glTF/releases/download/v0.14.1/FBX2glTF-linux-x86_64-release.zip"
+          if [ "$(stat -c%s /tmp/fbx2gltf.zip)" -lt 100000 ]; then
+            echo "::warning::FBX2glTF download too small; trying godotengine mirror"
+            curl -fsSL -o /tmp/fbx2gltf.zip \
+              "https://github.com/godotengine/FBX2glTF/releases/download/0.14.1/FBX2glTF-linux-x86_64.zip" || true
+          fi
+          unzip -o /tmp/fbx2gltf.zip -d "$HOME/.local/bin" 2>&1 | tail -5
+          chmod +x "$HOME/.local/bin/FBX2glTF"* 2>/dev/null || true
+          if [ ! -x "$HOME/.local/bin/FBX2glTF" ] && [ -f "$HOME/.local/bin/FBX2glTF-linux-x86_64-release" ]; then
+            mv "$HOME/.local/bin/FBX2glTF-linux-x86_64-release" "$HOME/.local/bin/FBX2glTF"
+            chmod +x "$HOME/.local/bin/FBX2glTF"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+          FBX2glTF --help 2>&1 | head -2 || echo "WARNING: FBX2glTF not runnable"
+
       - name: GDScript syntax check
         run: |
           python3 -m pip install --quiet "gdtoolkit>=4,<5"
@@ -54,19 +79,14 @@ jobs:
         run: godot --headless --import 2>&1 | tail -n 40
 
       - name: Build hero scene from Arabic FBX folder (headless)
+        timeout-minutes: 5
         run: |
-          # This runs HeroBuilder.build_hero() which scans res://الشخصيه/,
-          # merges the skinned mesh + all Mixamo animation clips, wires an
-          # AnimationTree (run_blend / lane_blend / jump/slide/stumble/fall/land
-          # one-shots), applies the Sudan chrome PBR suit material, and saves
-          # assets/models/hero/hero.tscn. No editor interaction required.
-          godot --headless --script tools/ci_build_hero.gd 2>&1 | tee hero_build.log
+          godot --headless -v --script tools/ci_build_hero.gd 2>&1 | tee hero_build.log | tail -n 80
           if ! grep -q "Hero build OK" hero_build.log; then
             echo "::error::Automated hero build failed"
-            tail -n 30 hero_build.log | sed 's/^/::error::/'
             exit 1
           fi
-          ls -la res://assets/models/hero/ 2>/dev/null || ls -la assets/models/hero/
+          ls -la assets/models/hero/
 
       - name: Headless gameplay smoke test
         run: |
@@ -146,6 +166,24 @@ jobs:
           use-dotnet: false
           include-templates: true
 
+      - name: Install FBX2glTF (Android job)
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o /tmp/fbx2gltf.zip \
+            "https://github.com/nicedoc/FBX2glTF/releases/download/v0.14.1/FBX2glTF-linux-x86_64-release.zip"
+          if [ "$(stat -c%s /tmp/fbx2gltf.zip)" -lt 100000 ]; then
+            curl -fsSL -o /tmp/fbx2gltf.zip \
+              "https://github.com/godotengine/FBX2glTF/releases/download/0.14.1/FBX2glTF-linux-x86_64.zip" || true
+          fi
+          unzip -o /tmp/fbx2gltf.zip -d "$HOME/.local/bin" 2>&1 | tail -5
+          chmod +x "$HOME/.local/bin/FBX2glTF"* 2>/dev/null || true
+          if [ ! -x "$HOME/.local/bin/FBX2glTF" ] && [ -f "$HOME/.local/bin/FBX2glTF-linux-x86_64-release" ]; then
+            mv "$HOME/.local/bin/FBX2glTF-linux-x86_64-release" "$HOME/.local/bin/FBX2glTF"
+            chmod +x "$HOME/.local/bin/FBX2glTF"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Configure Godot for Android export
         run: |
           mkdir -p "$HOME/.config/godot"
@@ -162,15 +200,11 @@ jobs:
         run: godot --headless --import 2>&1 | tail -n 20
 
       - name: Build hero scene from Arabic FBX folder (headless)
+        timeout-minutes: 5
         run: |
-          # Same step as in the validate job, repeated in the APK job because
-          # this is a fresh checkout. Without this the APK would ship with the
-          # procedural fallback model; with it the real imported hero ends up
-          # in assets/models/hero/hero.tscn and PlayerController picks it up.
-          godot --headless --script tools/ci_build_hero.gd 2>&1 | tee hero_build.log
+          godot --headless -v --script tools/ci_build_hero.gd 2>&1 | tee hero_build.log | tail -n 80
           if ! grep -q "Hero build OK" hero_build.log; then
             echo "::error::Automated hero build failed during APK export"
-            tail -n 30 hero_build.log | sed 's/^/::error::/'
             exit 1
           fi
           ls -la assets/models/hero/
