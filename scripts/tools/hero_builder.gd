@@ -148,8 +148,23 @@ func _do_build(strict := false) -> bool:
 	if suit_script != null:
 		var suit_mat: Material = suit_script.make_suit_material()
 		if suit_mat != null:
-			_apply_material(hero.get_node("Mesh"), suit_mat)
-		suit_script.ensure_reflection_probe(hero)
+			var n_surf: int = _apply_material(hero.get_node("Mesh"), suit_mat)
+			print("[HeroBuilder] PBR suit applied to %d surfaces" % n_surf)
+		# Reflection probes can cause invisible models on low-end Android
+		# GPUs in gl_compatibility mode. Skip on mobile/export target by
+		# guarding with editor-hint; rely on world environment reflections.
+		if Engine.is_editor_hint():
+			suit_script.ensure_reflection_probe(hero)
+
+	# Force the entire subtree visible (ufbx sometimes marks the imported
+	# armature as invisible if its import preset has "Visible to Raycasts"
+	# disabled — we want visible geometry in-game).
+	hero.visible = true
+	for n in hero.find_children("*", "", true, false):
+		if n is CanvasItem:
+			(n as CanvasItem).visible = true
+		elif n is Node3D:
+			(n as Node3D).visible = true
 
 	# Pack + save.
 	var pck := PackedScene.new()
@@ -302,29 +317,65 @@ func _build_hero_tree(skin_scene: PackedScene, _clips: Dictionary) -> Node3D:
 	return hero
 
 
-func _find_first_mesh(root: Node) -> MeshInstance3D:
-	for c in root.get_children():
+func _collect_meshes(root: Node) -> Array[MeshInstance3D]:
+	var out: Array[MeshInstance3D] = []
+	for c in root.get_children(true):
 		if c is MeshInstance3D and (c as MeshInstance3D).mesh != null:
-			return c as MeshInstance3D
-		var hit: MeshInstance3D = _find_first_mesh(c)
-		if hit != null:
-			return hit
-	return null
+			out.append(c as MeshInstance3D)
+	return out
+
+
+func _world_aabb(root: Node3D, meshes: Array[MeshInstance3D]) -> AABB:
+	var aabb: AABB
+	var first: bool = true
+	for mi in meshes:
+		# get_aabb() is local to the MeshInstance; transform to root space.
+		var local: AABB = mi.get_aabb()
+		var xform: Transform3D = root.global_transform.affine_inverse() * mi.global_transform
+		var world: AABB = xform * local
+		if first:
+			aabb = world
+			first = false
+		else:
+			aabb = aabb.merge(world)
+	return aabb
 
 
 func _fit_mesh(root: Node3D) -> void:
-	var mi: MeshInstance3D = _find_first_mesh(root)
-	if mi == null:
-		push_warning("[HeroBuilder] No mesh found; leaving default scale")
+	var meshes: Array[MeshInstance3D] = _collect_meshes(root)
+	if meshes.is_empty():
+		push_warning("[HeroBuilder] No mesh found under imported skin; leaving default scale and forcing visible")
+		root.visible = true
+		root.scale = Vector3.ONE
+		root.position = Vector3.ZERO
 		return
-	var aabb: AABB = mi.get_aabb()
-	var h: float = aabb.size.y
-	var s: float = 1.0
-	if h > 4.0:
-		s = 1.7 / h
-	root.scale = Vector3(s, s, s)
-	root.position.y = -aabb.position.y * s
+
+	# Compute a combined AABB in ROOT space (accounts for any armature /
+	# nested node offsets inside the FBX) and rescale the whole skin so the
+	# character stands ~1.7 m tall with feet exactly on Y=0.
+	var aabb: AABB = _world_aabb(root, meshes)
+	var height: float = aabb.size.y
+	var scale: float = 1.0
+	if height > 0.001:
+		if height > 4.0 or height < 0.5:
+			# Mixamo FBX (centimeters, ~170 units) or tiny-unit FBX -> 1.7 m.
+			scale = clamp(1.7 / height, 0.005, 500.0)
+	root.scale = Vector3(scale, scale, scale)
+
+	# Place feet on ground and centre horizontally.
+	root.position = Vector3(
+		-(aabb.position.x + aabb.size.x * 0.5) * scale,
+		-aabb.position.y * scale,
+		-(aabb.position.z + aabb.size.z * 0.5) * scale
+	)
 	root.rotation = Vector3.ZERO
+
+	# Force visibility on every mesh instance.
+	for mi in meshes:
+		mi.visible = true
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		mi.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+	print("[HeroBuilder] fit: AABB %s -> scale=%.4f, pos=%s, mesh_count=%d" % [aabb, scale, root.position, meshes.size()])
 
 
 ## ---------------------------------------------------------------------------
@@ -438,12 +489,11 @@ func _build_state_machine() -> AnimationNodeStateMachine:
 	bs1d.blend_mode = AnimationNodeBlendSpace1D.BLEND_MODE_INTERPOLATED
 	bs1d.snap = 0.0
 	loco.add_node("locomotion", bs1d, Vector2(60, 80))
-	var lean: AnimationNodeBlend2 = AnimationNodeBlend2.new()
-	lean.amount = 0.0
-	loco.add_node("lean", lean, Vector2(280, 80))
-	loco.connect_node("lean", 0, "locomotion")
-	loco.connect_node("lean", 1, "locomotion")
-	loco.connect_node("output", 0, "lean")
+	# Connect locomotion straight to output — lane lean is driven via
+	# playback/travel on the AnimationTree, not a Blend2 input (the Blend2
+	# was incorrectly wiring two copies of locomotion together which made
+	# the pose snap between frames and sometimes produced zero-weight bones).
+	loco.connect_node("output", 0, "locomotion")
 	sm.add_node("locomotion", loco, Vector2(0, 0))
 
 	sm.add_node("jump",    _anim("jump"),    Vector2(280, -150))
@@ -486,7 +536,8 @@ func _anim(name: String) -> AnimationNodeAnimation:
 ## ---------------------------------------------------------------------------
 ## PBR suit material application
 ## ---------------------------------------------------------------------------
-func _apply_material(root: Node, mat: Material) -> void:
+func _apply_material(root: Node, mat: Material) -> int:
+	var count: int = 0
 	for node in _nodes_of_type(root, MeshInstance3D):
 		var mi: MeshInstance3D = node as MeshInstance3D
 		if mi.mesh == null:
@@ -496,4 +547,6 @@ func _apply_material(root: Node, mat: Material) -> void:
 			continue
 		for s in range(mi.mesh.get_surface_count()):
 			mi.set_surface_override_material(s, mat)
+			count += 1
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	return count

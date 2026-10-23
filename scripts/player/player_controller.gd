@@ -116,7 +116,9 @@ func _attach_model() -> void:
 			# Make sure the tree is active.
 			if _anim_tree:
 				_anim_tree.active = true
+			print("[PlayerController] Imported Mixamo hero attached at %s" % _hero.global_position)
 			return
+	push_warning("[PlayerController] hero.tscn not found - falling back to procedural model.")
 	# Fallback: procedural model.
 	_model = RunnerModel.new()
 	_model.name = "Model"
