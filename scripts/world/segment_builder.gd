@@ -321,8 +321,10 @@ static func _building_into(st: SurfaceTool, tools: Dictionary,
 
 static func _shop_awning(st: SurfaceTool, side: float, z: float,
 		rng: RandomNumberGenerator) -> void:
-	var col: Color = [PALETTE["cloth_a"], PALETTE["cloth_c"], PALETTE["green"]][
-			rng.randi_range(0, 2)]
+	# Faded cotton, sun-bleached: saturated primaries are what made the street
+	# look like a cartoon market.
+	var col: Color = [Color("#c98a4b"), Color("#7e9bb0"), Color("#6f7f5a"),
+			Color("#b4695a")][rng.randi_range(0, 3)]
 	var x := side * (INNER + 0.9)
 	for i in 4:
 		MeshKit.add_box(st, Vector3(x - side * float(i) * 0.55, 3.2 - float(i) * 0.12, z),
@@ -339,14 +341,41 @@ static func _lamp(st: SurfaceTool, side: float, z: float) -> void:
 	MeshKit.add_box(st, Vector3(x, 0.2, z), Vector3(0.36, 0.3, 0.36), PALETTE["dark"])
 
 
+## Umbrella-thorn acacia: the tree that lines every Khartoum street.
+##
+## It used to be two big flat boxes, which read as green hedges floating over the
+## road - the single most cartoonish thing left in the frame. The canopy is now a
+## fan of narrow, slightly drooping leaf clusters around a dark core, in muted
+## olive tones, so it reads as a tree at chase-camera distance and costs 12 quads.
 static func _acacia(st: SurfaceTool, x: float, z: float, rng: RandomNumberGenerator) -> void:
 	var h := rng.randf_range(2.6, 3.8)
-	MeshKit.add_cylinder(st, Vector3(x, 0.16, z), 0.16, h, Color("#5a4530"), 5, 0.11)
-	var canopy_w := rng.randf_range(3.2, 5.0)
-	MeshKit.add_box(st, Vector3(x, h + 0.55, z), Vector3(canopy_w, 0.55, canopy_w * 0.9),
-			PALETTE["leaf"])
-	MeshKit.add_box(st, Vector3(x + 0.5, h + 1.0, z - 0.4),
-			Vector3(canopy_w * 0.6, 0.4, canopy_w * 0.55), PALETTE["leaf_dark"])
+	var base := Vector3(x, 0.16, z)
+	MeshKit.add_cylinder(st, base, 0.17, h, Color("#54402e"), 5, 0.12)
+	# Two forked limbs, so the crown does not look glued to a stick.
+	for k in 2:
+		var a := rng.randf_range(0.0, TAU)
+		var tip := base + Vector3(cos(a) * 0.9, h * 0.95, sin(a) * 0.9)
+		MeshKit.add_quad(st, base + Vector3(0, h * 0.55, 0),
+				base + Vector3(0.13, h * 0.55, 0.13), tip + Vector3(0.13, 0, 0.13), tip,
+				Color("#6b5238"))
+	var crown := h + 0.35
+	var spread := rng.randf_range(1.9, 2.9)
+	var leaves := 13
+	for i in leaves:
+		var a := TAU * float(i) / float(leaves) + rng.randf_range(-0.16, 0.16)
+		var dir := Vector3(cos(a), 0.0, sin(a))
+		var len := spread * rng.randf_range(0.75, 1.15)
+		var droop := rng.randf_range(0.18, 0.55)
+		var mid := base + Vector3(0, crown + 0.25, 0) + dir * (len * 0.45)
+		var tip := base + Vector3(0, crown - droop, 0) + dir * len
+		var perp := Vector3(-dir.z, 0.0, dir.x) * rng.randf_range(0.34, 0.55)
+		# Alternate the two greens so the crown has depth instead of one flat tone.
+		var col: Color = PALETTE["leaf"] if i % 3 else PALETTE["leaf_dark"]
+		MeshKit.add_quad(st, mid - perp, mid + perp, tip + perp * 0.35, tip - perp * 0.35,
+				col.darkened(rng.randf_range(0.0, 0.12)))
+	# Dark core under the leaves fills the gap when seen from below.
+	MeshKit.add_cylinder(st, base + Vector3(0, crown - 0.35, 0), spread * 0.42, 0.45,
+			PALETTE["leaf_dark"].darkened(0.15), 7)
 
 
 static func _parked_car(st: SurfaceTool, side: float, z: float,
@@ -399,8 +428,8 @@ static func _build_market(tools: Dictionary, rng: RandomNumberGenerator, density
 static func _stall(st: SurfaceTool, side: float, z: float,
 		rng: RandomNumberGenerator) -> void:
 	var x: float = side * (INNER - 0.6)
-	var cloth: Color = [PALETTE["cloth_a"], PALETTE["cloth_b"], PALETTE["cloth_c"],
-			PALETTE["green"], PALETTE["red"]][rng.randi_range(0, 4)]
+	var cloth: Color = [Color("#c98a4b"), Color("#8a6f9b"), Color("#6f88a8"),
+			Color("#7f8f68"), Color("#b4695a")][rng.randi_range(0, 4)]
 	# Counter + legs.
 	MeshKit.add_box(st, Vector3(x, 0.82, z), Vector3(1.9, 0.12, 2.6), PALETTE["wood"])
 	for sx: float in [-0.8, 0.8]:

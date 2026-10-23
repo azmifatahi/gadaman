@@ -336,14 +336,19 @@ func _build_touch_buttons() -> void:
 	# Anchored to the bottom corners with a 26 px safe margin. PRESET_MODE_MINSIZE
 	# makes the container exactly as big as its two 96 px pads, so the pads sit in
 	# thumb reach without covering the runner.
+	# Force LTR: Godot mirrors LayoutPresets under an RTL layout direction, which
+	# would put the steer pads on the right thumb and the jump/slide pads on the
+	# left in Arabic. Game controls are spatial, not textual.
 	var left_group := HBoxContainer.new()
 	left_group.name = "LeftPads"
+	left_group.layout_direction = Control.LAYOUT_DIRECTION_LTR
 	left_group.add_theme_constant_override("separation", 14)
 	left_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_buttons.add_child(left_group)
 
 	var right_group := HBoxContainer.new()
 	right_group.name = "RightPads"
+	right_group.layout_direction = Control.LAYOUT_DIRECTION_LTR
 	right_group.add_theme_constant_override("separation", 14)
 	right_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_buttons.add_child(right_group)

@@ -14,17 +14,31 @@ extends SceneTree
 const SEGMENTS := preload("res://scripts/world/segment_builder.gd")
 const KIT := preload("res://scripts/world/mesh_kit.gd")
 
-## Minimum vertices per district, per surface family. A surface missing entirely
-## means a texture would not show up in game.
+## Surfaces every slot of a district must contain. A surface missing entirely
+## means its texture never shows up in game.
+##
+## "facade*" is a wildcard: each building picks one of the three photographed
+## shopfronts, so which of facade/facade_b/facade_c a slot contains depends on
+## its RNG seed. Requiring one specific name fails a perfectly good street.
 const EXPECTED := {
-	0: ["road", "walk", "art", "ground", "facade"],
-	1: ["road", "walk", "art", "ground", "facade"],
-	2: ["road", "walk", "art", "ground", "facade", "water", "concrete"],
-	3: ["road", "walk", "art", "ground", "facade_c"],
+	0: ["road", "walk", "art", "ground", "facade*"],
+	1: ["road", "walk", "art", "ground", "facade*"],
+	2: ["road", "walk", "art", "ground", "facade*", "water", "concrete"],
+	3: ["road", "walk", "art", "ground", "facade*"],
 	4: ["road", "walk", "art", "ground", "water", "steel", "concrete"],
 	5: ["road", "walk", "art", "ground", "water", "concrete"],
-	6: ["road", "walk", "art", "ground", "facade"],
+	6: ["road", "walk", "art", "ground", "facade*"],
 }
+
+
+static func _surface_matches(present: PackedStringArray, wanted: String) -> bool:
+	if wanted.ends_with("*"):
+		var prefix := wanted.substr(0, wanted.length() - 1)
+		for name in present:
+			if String(name).begins_with(prefix):
+				return true
+		return false
+	return present.has(wanted)
 
 var _problems: Array[String] = []
 var _summary: Dictionary = {}
@@ -87,7 +101,7 @@ func _check_segments() -> void:
 				_problems.append("variant %d slot %d: %d surfaces but %d names" % [
 					variant, slot, mesh.get_surface_count(), names.size()])
 			for surface_name in want:
-				if not names.has(surface_name):
+				if not _surface_matches(names, String(surface_name)):
 					_problems.append("variant %d slot %d is missing the '%s' surface" % [
 						variant, slot, surface_name])
 			var tris := 0
