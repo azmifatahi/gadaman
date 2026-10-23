@@ -52,6 +52,11 @@ const HERO_DIR := "res://assets/models/hero/"
 const HERO_SCENE_PATH := HERO_DIR + "hero.tscn"
 const HERO_REPORT_PATH := HERO_DIR + "hero_report.txt"
 
+## Shared animation graph/classification: the same code builds the tree offline
+## (here) and repairs it at runtime (player_animation_handler.gd), so the two
+## can never drift apart.
+const ANIM_GRAPH := preload("res://scripts/player/hero_animation_graph.gd")
+
 ## Final on-screen height of the runner, in metres.
 const TARGET_HEIGHT := 1.78
 ## Sanity window used by verify(): outside of this the scene is rejected.
