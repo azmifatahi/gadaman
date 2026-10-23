@@ -201,6 +201,11 @@ func _do_build(strict := false) -> bool:
 		hero.free()
 		return false
 	mesh_root.name = "Mesh"
+	# Bake the imported scene into our own scene instead of keeping it as an
+	# FBX sub-instance: the hero must not depend on the FBX import cache being
+	# present at runtime (and PackedScene.pack() would otherwise store an
+	# `instance=ExtResource(Run Forward.fbx)` reference).
+	mesh_root.set_scene_file_path("")
 	hero.add_child(mesh_root, true)
 
 	var skeleton := _first_skeleton(mesh_root)
@@ -977,7 +982,8 @@ func _add_trans(sm: AnimationNodeStateMachine, from: String, to: String,
 	else:
 		t.switch_mode = AnimationNodeStateMachineTransition.SWITCH_MODE_IMMEDIATE
 		t.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_ENABLED
-	t.fade_time = xfade
+	# Godot 4 renamed this property: it is `xfade_time`, not `fade_time`.
+	t.xfade_time = xfade
 	sm.add_transition(from, to, t)
 
 

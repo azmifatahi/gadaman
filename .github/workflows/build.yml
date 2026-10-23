@@ -90,6 +90,18 @@ jobs:
             exit 1
           }
 
+      - name: Probe hero animation (strict)
+        run: |
+          # Data checks are not enough: this instantiates the scene in a real
+          # SceneTree and fails if the skeleton stays frozen (T-pose).
+          set -o pipefail
+          timeout 120 godot --headless --script tools/ci_hero_probe.gd -- --strict \
+            2>&1 | tee hero_probe.log | tail -n 60
+          grep -q "\[HeroProbe\] OK" hero_probe.log || {
+            echo "::error::hero.tscn does not animate (frozen skeleton)."
+            exit 1
+          }
+
       - name: Publish hero build summary (annotations)
         if: always()
         run: |
@@ -102,6 +114,10 @@ jobs:
           if [ -f assets/models/hero/hero_report.txt ]; then
             tr -d '\n' < assets/models/hero/hero_report.txt | cut -c1-3000 \
               | while IFS= read -r line; do echo "::notice::hero_report ${line}"; done
+          fi
+          if [ -f hero_probe.log ]; then
+            grep "\[HeroProbe\]" hero_probe.log | tail -n 40 \
+              | while IFS= read -r line; do echo "::notice::${line}"; done
           fi
 
       - name: Headless gameplay smoke test
@@ -142,6 +158,10 @@ jobs:
             assets/models/hero/
             .godot/
           if-no-files-found: error
+          # .godot is a dot-directory: without this it is silently dropped and
+          # the APK job ends up with no import cache / no script class cache
+          # (that is why its verify step could not even resolve HeroBuilder).
+          include-hidden-files: true
 
   # ---------------------------------------------------------------------------
   # 2. Export a signed (debug key) APK. Debug signing keeps the workflow usable
@@ -222,6 +242,18 @@ jobs:
             exit 1
           fi
 
+      - name: Ensure import + script class cache
+        run: |
+          if [ ! -f .godot/global_script_class_cache.cfg ]; then
+            echo "::warning::.godot cache missing – running a full import pass."
+            godot --headless --import 2>&1 | tail -n 5
+          fi
+          python3 - <<'PY'
+          import os
+          print("Class cache:", os.path.exists(".godot/global_script_class_cache.cfg"))
+          print("Hero scene :", os.path.exists("assets/models/hero/hero.tscn"))
+          PY
+
       - name: Verify restored hero scene (strict)
         run: |
           echo "::group::hero_report.json"
@@ -248,7 +280,7 @@ jobs:
             emit "hero_size: $(stat -c %s assets/models/hero/hero.tscn)"
             emit "hero_nodes: $(grep -c '^\[node' assets/models/hero/hero.tscn)"
           fi
-          for f in hero_verify_apk.log hero_verify.log; do
+          for f in hero_verify_apk.log hero_verify.log hero_probe.log; do
             if [ -f "$f" ]; then
               emit "log $f: $(tail -n 40 "$f" | tr '\n' '|')"
             fi
@@ -389,8 +421,11 @@ jobs:
           timeout 120 godot --headless --script tools/ci_verify_hero.gd 2>&1 \
             | tee hero_verify.log | tail -n 40 || true
           grep -E "\[CIVerifyHero\]" hero_verify.log | tail -n 5 || true
+          timeout 120 godot --headless --script tools/ci_hero_probe.gd 2>&1 \
+            | tee hero_probe.log | tail -n 40 || true
           mkdir -p docs
           cp assets/models/hero/hero_report.txt docs/hero_report.txt 2>/dev/null || true
+          cp hero_probe.log docs/hero_runtime.txt 2>/dev/null || true
 
       - name: Render screenshots
         env:
@@ -418,6 +453,9 @@ jobs:
           git add docs/screenshots/*.png
           if [ -f docs/hero_report.txt ]; then
             git add docs/hero_report.txt
+          fi
+          if [ -f docs/hero_runtime.txt ]; then
+            git add docs/hero_runtime.txt
           fi
           git commit -m "docs: automated gameplay screenshots"
           git push origin "HEAD:${{ github.ref_name }}"
