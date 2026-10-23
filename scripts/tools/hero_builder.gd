@@ -129,10 +129,23 @@ func _do_build(allow_fallback := true) -> bool:
 		return false
 	print("[HeroBuilder] skin = %s, clips = %s" % [skin_path.get_file(), anim_clips.keys()])
 
-	# Try to load the skin scene (FBX or GLB).
+	# Try to load the skin scene. NB: never call ResourceLoader.exists/load on
+	# an .fbx path unless FBX2glTF is on PATH — Godot shells out to the
+	# converter and hangs forever if it can't be found. For GLB/GLTF the
+	# importer is built-in and safe.
+	var is_safe_to_load := skin_path.to_lower().ends_with(".glb") \
+			or skin_path.to_lower().ends_with(".gltf") \
+			or _fbx2gltf_available()
 	var skin_scene: PackedScene = null
-	if ResourceLoader.exists(skin_path):
+	if is_safe_to_load and ResourceLoader.exists(skin_path):
 		skin_scene = load(skin_path)
+	if not is_safe_to_load:
+		_issues.append("Skip FBX %s - FBX2glTF unavailable" % skin_path.get_file())
+		if not allow_fallback:
+			push_error("[HeroBuilder] %s" % _issues[-1])
+			return false
+		push_warning("[HeroBuilder] %s (procedural model used)" % _issues[-1])
+		return false
 	if skin_scene == null:
 		_issues.append("Cannot load skin FBX %s (FBX2glTF may be missing)" % skin_path)
 		if not allow_fallback:
