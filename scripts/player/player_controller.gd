@@ -335,28 +335,16 @@ func _physics_process(delta: float) -> void:
 	run_blend = move_toward(run_blend, clampf((spd - 9.0) / 18.0, 0.0, 1.0), delta * 2.8)
 	if _model:
 		_model.animate(delta, spd, is_sliding, is_airborne)
-	# Drive the imported AnimationTree.
-	if _anim_tree:
-		_drive_anim_tree(delta, spd)
-	elif _anim_handler and _anim_handler.has_method("tick"):
+	# Drive the imported hero: AnimationTree when available, otherwise the
+	# handler drives the AnimationPlayer directly.
+	if _anim_handler and _anim_handler.has_method("set_run_blend"):
+		_anim_handler.set_run_blend(run_blend)
+	if _anim_handler and _anim_handler.has_method("tick"):
 		_anim_handler.tick(delta, is_sliding, is_airborne, is_stumbling)
 	var intensity := clampf((spd - 11.0) / 16.0, 0.0, 1.0)
 	if absf(intensity - _last_intensity) > 0.025:
 		_last_intensity = intensity
 		action_intensity_changed.emit(intensity)
-
-
-func _drive_anim_tree(delta: float, _speed: float) -> void:
-	if _anim_tree == null:
-		return
-	# The AnimationTree root is an AnimationNodeStateMachine whose "locomotion"
-	# state embeds a BlendTree with a BlendSpace1D also named "locomotion".
-	# PlayerAnimationHandler discovers that parameter path once and only sets it
-	# when it really exists, so we never spam the console with invalid paths.
-	if _anim_handler and _anim_handler.has_method("set_run_blend"):
-		_anim_handler.set_run_blend(run_blend)
-	if _anim_handler and _anim_handler.has_method("tick"):
-		_anim_handler.tick(delta, is_sliding, is_airborne, is_stumbling)
 
 
 func _reset_tree_oneshots() -> void:

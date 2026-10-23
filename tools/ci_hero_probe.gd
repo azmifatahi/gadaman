@@ -20,6 +20,7 @@ var _tree: AnimationTree
 var _player: AnimationPlayer
 var _playback: AnimationNodeStateMachinePlayback
 var _blend_path := ""
+var _mode := ""
 var _frame := 0
 var _before: Array = []
 var _strict := false
@@ -91,6 +92,14 @@ func _dump_structure() -> void:
 	if not _blend_path.is_empty():
 		_tree.set(_blend_path, 0.55)
 		print("[HeroProbe] blend_position set to 0.55 (jog)")
+	if _playback != null:
+		_mode = "tree"
+	else:
+		# Same fallback the game uses: drive the AnimationPlayer directly.
+		_mode = "player"
+		_tree.active = false
+		_player.play("jog", 0.0)
+		print("[HeroProbe] AnimationTree unusable -> driving AnimationPlayer directly (jog)")
 
 
 func _process(_delta: float) -> bool:

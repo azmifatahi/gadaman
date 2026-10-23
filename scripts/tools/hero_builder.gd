@@ -278,6 +278,10 @@ func _do_build(strict := false) -> bool:
 	hero.visible = true
 	mesh_root.visible = true
 
+	print("[HeroBuilder] tree_root before pack: %s" % (
+		hero.get_node("AnimationTree").tree_root.get_class() \
+		if (hero.get_node("AnimationTree") as AnimationTree).tree_root != null else "<null>"))
+
 	var pck := PackedScene.new()
 	var err := pck.pack(hero)
 	if err != OK:
@@ -1007,7 +1011,9 @@ func _do_verify(path: String) -> Dictionary:
 		"feet": 0.0,
 		"bone_span": 0.0,
 		"clips": {},
+		"tree_root": "",
 		"problems": [],
+		"warnings": [],
 	}
 	var problems: Array = report["problems"]
 
@@ -1073,8 +1079,15 @@ func _do_verify(path: String) -> Dictionary:
 			clips[key] = resolved
 			if resolved <= 0:
 				problems.append("clip '%s' has no track that resolves inside the hero" % key)
-	if _find_first_animation_tree(inst) == null:
-		problems.append("no AnimationTree in the scene")
+	var anim_tree := _find_first_animation_tree(inst)
+	var warnings: Array = report["warnings"]
+	if anim_tree == null:
+		warnings.append("no AnimationTree in the scene (AnimationPlayer fallback will be used)")
+	else:
+		var root = anim_tree.tree_root
+		report["tree_root"] = root.get_class() if root != null else ""
+		if root == null:
+			warnings.append("AnimationTree.tree_root is empty (AnimationPlayer fallback will be used)")
 
 	if meshes <= 0:
 		problems.append("hero has no mesh at all (empty scene)")

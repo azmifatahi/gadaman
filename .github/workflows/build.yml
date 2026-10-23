@@ -426,6 +426,18 @@ jobs:
           mkdir -p docs
           cp assets/models/hero/hero_report.txt docs/hero_report.txt 2>/dev/null || true
           cp hero_probe.log docs/hero_runtime.txt 2>/dev/null || true
+          # Small slice of the generated scene for debugging serialization.
+          {
+            echo "== AnimationTree block =="
+            grep -n -A 8 'type="AnimationTree"' assets/models/hero/hero.tscn | head -n 30 || true
+            echo "== tree_root lines =="
+            grep -n 'tree_root' assets/models/hero/hero.tscn | head -n 10 || true
+            echo "== sub_resources: $(grep -c '^\[sub_resource' assets/models/hero/hero.tscn || true)"
+            echo "== ext_resources =="
+            grep -n '^\[ext_resource' assets/models/hero/hero.tscn | head -n 10 || true
+            echo "== nodes =="
+            grep -n '^\[node' assets/models/hero/hero.tscn | head -n 20 || true
+          } > docs/hero_scene.txt
 
       - name: Render screenshots
         env:
@@ -456,6 +468,9 @@ jobs:
           fi
           if [ -f docs/hero_runtime.txt ]; then
             git add docs/hero_runtime.txt
+          fi
+          if [ -f docs/hero_scene.txt ]; then
+            git add docs/hero_scene.txt
           fi
           git commit -m "docs: automated gameplay screenshots"
           git push origin "HEAD:${{ github.ref_name }}"
