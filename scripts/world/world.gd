@@ -106,7 +106,7 @@ func _warm_shaders() -> void:
 	for child in fx.get_children():
 		var particles := child as GPUParticles3D
 		if particles != null and particles.draw_pass_1 != null:
-			var pm := particles.draw_pass_1.material
+			var pm: Material = particles.draw_pass_1.material
 			if pm != null:
 				mats.append(pm)
 	var skyline := get_node_or_null("KhartoumSkyline") as MeshInstance3D

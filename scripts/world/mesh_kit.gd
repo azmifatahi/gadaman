@@ -493,7 +493,8 @@ static func asphalt_photo_material() -> StandardMaterial3D:
 			m.detail_enabled = true
 			m.detail_albedo = load(GRAIN)
 			m.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
-			m.detail_uv = BaseMaterial3D.DETAIL_UV_1
+			# Godot 4 name (Godot 3's `detail_uv` was remapped away).
+			m.detail_uv_layer = BaseMaterial3D.DETAIL_UV_1
 		# A touch of warmth keeps the grain from cooling the asphalt down.
 		m.albedo_color = Color(0.92, 0.90, 0.88)
 		_mat_road_photo = m
