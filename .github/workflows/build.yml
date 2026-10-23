@@ -184,15 +184,21 @@ jobs:
           echo "--- end log ---"
           if ! grep -q "Hero build OK" hero_build.log; then
             echo "::error::Hero build failed in APK job – aborting export."
-            echo "::group::Folder listing"
             ls -la "assets/characters/" 2>/dev/null || true
             ls -la "assets/characters/الشخصية/" 2>/dev/null || echo "no arabic folder"
             echo "--- imported FBX files ---"
             find .godot/imported -iname "*fbx*" 2>/dev/null | head -40
-            echo "::endgroup::"
             exit 1
           fi
           ls -la assets/models/hero/
+
+      - name: Upload hero build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-hero-build-log
+          path: hero_build.log
+          if-no-files-found: ignore
       - name: Diagnostics
         run: |
           godot --version
