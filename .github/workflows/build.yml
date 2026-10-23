@@ -42,41 +42,37 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"
-          # Try several mirrors; if none work we skip FBX2glTF and the hero
-          # build falls back to the procedural RunnerModel.
+          # The godotengine/FBX2glTF GitHub Release at 0.14.1 is the stable binary.
+          # GitHub redirects require -L (follow) and the asset name on godotengine
+          # is exactly FBX2glTF-linux-x86_64-release.zip (no subfolder inside).
           FBX_OK=0
+          cd /tmp
           for url in \
-            "https://github.com/nicedoc/FBX2glTF/releases/download/v0.14.1/FBX2glTF-linux-x86_64-release.zip" \
+            "https://github.com/godotengine/FBX2glTF/releases/download/0.14.1/FBX2glTF-linux-x86_64.zip" \
             "https://github.com/godotengine/FBX2glTF/releases/download/v0.14.1/FBX2glTF-linux-x86_64.zip" \
-            "https://github.com/V-Sekai/FBX2glTF/releases/download/v0.14.1/FBX2glTF-linux-x86_64.zip"; do
-            if curl -fsSL --connect-timeout 15 --max-time 60 -o /tmp/fbx2gltf.zip "$url" \
-               && [ "$(stat -c%s /tmp/fbx2gltf.zip 2>/dev/null || echo 0)" -gt 100000 ]; then
-              FBX_OK=1
-              echo "Downloaded FBX2glTF from $url"
-              break
-            fi
-            echo "Mirror failed: $url"
-          done
-          if [ "$FBX_OK" = "1" ]; then
-            unzip -o /tmp/fbx2gltf.zip -d "$HOME/.local/bin" 2>&1 | tail -3
-            for b in "$HOME/.local/bin"/FBX2glTF*; do
-              if [ -f "$b" ] && [ ! -x "$b" ] || [ -f "$b" ]; then
-                chmod +x "$b" 2>/dev/null || true
+            "https://github.com/nicedoc/FBX2glTF/releases/download/v0.14.1/FBX2glTF-linux-x86_64-release.zip"; do
+            rm -f fbx2gltf.zip FBX2glTF FBX2glTF-linux-*
+            echo "Trying $url"
+            if curl -fL --connect-timeout 20 --max-time 120 -o fbx2gltf.zip "$url" \
+               && [ "$(stat -c%s fbx2gltf.zip 2>/dev/null || echo 0)" -gt 500000 ]; then
+              if unzip -o fbx2gltf.zip 2>&1 | tail -5; then
+                for b in FBX2glTF*; do
+                  if [ -f "$b" ]; then
+                    chmod +x "$b"
+                    mv "$b" "$HOME/.local/bin/FBX2glTF"
+                    FBX_OK=1
+                    echo "Installed FBX2glTF from $url"
+                    break 2
+                  fi
+                done
               fi
-            done
-            if [ ! -x "$HOME/.local/bin/FBX2glTF" ]; then
-              for n in "$HOME/.local/bin"/FBX2glTF*; do
-                if [ -f "$n" ] && [ "$n" != "$HOME/.local/bin/FBX2glTF" ]; then
-                  mv "$n" "$HOME/.local/bin/FBX2glTF"
-                  chmod +x "$HOME/.local/bin/FBX2glTF"
-                  break
-                fi
-              done
             fi
-            echo "FBX2glTF installed:"
-            ls -la "$HOME/.local/bin/FBX2glTF" 2>&1 || echo "(not found)"
+          done
+          if [ "$FBX_OK" != "1" ]; then
+            echo "::warning::FBX2glTF install failed; APK will fall back to procedural model this run."
           else
-            echo "::warning::FBX2glTF could not be downloaded; hero build will be skipped and procedural model used."
+            echo "FBX2glTF ready:"; ls -la "$HOME/.local/bin/FBX2glTF"
+            "$HOME/.local/bin/FBX2glTF" --help 2>&1 | head -2 || true
           fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
@@ -186,17 +182,28 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"
-          curl -fsSL -o /tmp/fbx2gltf.zip \
-            "https://github.com/nicedoc/FBX2glTF/releases/download/v0.14.1/FBX2glTF-linux-x86_64-release.zip"
-          if [ "$(stat -c%s /tmp/fbx2gltf.zip)" -lt 100000 ]; then
-            curl -fsSL -o /tmp/fbx2gltf.zip \
-              "https://github.com/godotengine/FBX2glTF/releases/download/0.14.1/FBX2glTF-linux-x86_64.zip" || true
-          fi
-          unzip -o /tmp/fbx2gltf.zip -d "$HOME/.local/bin" 2>&1 | tail -5
-          chmod +x "$HOME/.local/bin/FBX2glTF"* 2>/dev/null || true
-          if [ ! -x "$HOME/.local/bin/FBX2glTF" ] && [ -f "$HOME/.local/bin/FBX2glTF-linux-x86_64-release" ]; then
-            mv "$HOME/.local/bin/FBX2glTF-linux-x86_64-release" "$HOME/.local/bin/FBX2glTF"
-            chmod +x "$HOME/.local/bin/FBX2glTF"
+          FBX_OK=0
+          cd /tmp
+          for url in \
+            "https://github.com/godotengine/FBX2glTF/releases/download/0.14.1/FBX2glTF-linux-x86_64.zip" \
+            "https://github.com/nicedoc/FBX2glTF/releases/download/v0.14.1/FBX2glTF-linux-x86_64-release.zip"; do
+            rm -f fbx2gltf.zip FBX2glTF FBX2glTF-linux-*
+            if curl -fL --connect-timeout 20 --max-time 120 -o fbx2gltf.zip "$url" \
+               && [ "$(stat -c%s fbx2gltf.zip 2>/dev/null || echo 0)" -gt 500000 ]; then
+              if unzip -o fbx2gltf.zip 2>&1 | tail -3; then
+                for b in FBX2glTF*; do
+                  if [ -f "$b" ]; then
+                    chmod +x "$b"
+                    mv "$b" "$HOME/.local/bin/FBX2glTF"
+                    FBX_OK=1
+                    break 2
+                  fi
+                done
+              fi
+            fi
+          done
+          if [ "$FBX_OK" != "1" ]; then
+            echo "::warning::FBX2glTF unavailable; hero build will fail (strict mode)."
           fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
