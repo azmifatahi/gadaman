@@ -34,7 +34,7 @@ Godot Engine v4.4.1.stable.official.49a5bc7b6 - https://godotengine.org
 [HeroBuilder] assigned owner to 5 nodes
 [HeroBuilder] jog     length=0.58s tracks=53 moved=20/65 bones
 [HeroBuilder] jump    length=0.87s tracks=53 moved=22/65 bones
-[HeroBuilder] slide   length=1.53s tracks=43 moved=41/65 bones
+[HeroBuilder] slide   length=1.53s tracks=43 moved=42/65 bones
 [HeroBuilder] ✔ wrote res://assets/models/hero/hero.tscn (meshes=2 verts=28374 bones=65 height=1.78m)
 [CIBuildHero] OK -> res://assets/models/hero/hero.tscn
 First run of Sudan Runner 1.2.2

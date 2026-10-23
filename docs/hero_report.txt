@@ -16,14 +16,14 @@
     "fall": {
       "bones": 65,
       "length": 1.06666994094849,
-      "moved": 41,
+      "moved": 39,
       "playable": true,
       "tracks": 43
     },
     "idle": {
       "bones": 65,
       "length": 1.0,
-      "moved": 51,
+      "moved": 0,
       "playable": true,
       "tracks": 53
     },
@@ -44,28 +44,28 @@
     "land": {
       "bones": 65,
       "length": 1.06666994094849,
-      "moved": 42,
+      "moved": 39,
       "playable": true,
       "tracks": 43
     },
     "slide": {
       "bones": 65,
       "length": 1.53332996368408,
-      "moved": 41,
+      "moved": 42,
       "playable": true,
       "tracks": 43
     },
     "sprint": {
       "bones": 65,
       "length": 0.364582985639572,
-      "moved": 41,
+      "moved": 20,
       "playable": true,
       "tracks": 53
     },
     "stumble": {
       "bones": 65,
       "length": 1.16666996479034,
-      "moved": 48,
+      "moved": 51,
       "playable": true,
       "tracks": 53
     }

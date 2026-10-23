@@ -18,6 +18,6 @@ Godot Engine v4.4.1.stable.official.49a5bc7b6 - https://godotengine.org
 [HeroProbe]   track1 type=2 path='Mesh/Skeleton3D:mixamorig_Hips' node=Skeleton3D bone=0
 [HeroProbe]   track2 type=2 path='Mesh/Skeleton3D:mixamorig_Spine' node=Skeleton3D bone=1
 [HeroProbe]   track3 type=2 path='Mesh/Skeleton3D:mixamorig_RightUpLeg' node=Skeleton3D bone=55
-[HeroProbe] frame 10 pose captured (clip='jog' playing=true t=0.108 bone1=(-0.034787, 0.078993, -0.022071, 0.996024))
-[HeroProbe] frame 45 pose compare: 18/65 bones moved (clip='jog' t=0.101 bone1=(-0.03818, 0.099893, -0.026673, 0.993908))
+[HeroProbe] frame 10 pose captured (clip='jog' playing=true t=0.104 bone1=(-0.034495, 0.078263, -0.021177, 0.996111))
+[HeroProbe] frame 45 pose compare: 18/65 bones moved (clip='jog' t=0.101 bone1=(-0.038224, 0.100003, -0.026803, 0.993891))
 [HeroProbe] OK: the hero animates (18/65 bones moved).
