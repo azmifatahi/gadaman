@@ -54,8 +54,10 @@ func _process(delta: float) -> void:
 	if track:
 		speed = track.speed
 
-	# Lateral follow is softer than the player's own lane snap.
-	_current_x = lerp(_current_x, px * 0.62, 1.0 - exp(-delta * 7.0))
+	# Lateral follow is softer than the player's own lane snap, but fast enough
+	# that a lane change never feels like it *lands* late (that lag was the
+	# complaint behind the sluggish tilt steering).
+	_current_x = lerp(_current_x, px * 0.62, 1.0 - exp(-delta * 9.0))
 
 	var distance := BASE_DISTANCE + clampf((speed - 11.0) * 0.055, 0.0, 1.1)
 	var height := BASE_HEIGHT + py * 0.28

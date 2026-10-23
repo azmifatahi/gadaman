@@ -33,9 +33,12 @@ signal action_intensity_changed(value: float)
 
 const LANE_WIDTH := 2.4
 const LANE_COUNT := 3
-const LANE_CHANGE_TIME := 0.20
-const LATERAL_ACCELERATION := 115.0
-const LATERAL_DAMPING := 16.0
+const LANE_CHANGE_TIME := 0.20   # target time to the next lane (documentation)
+## Lane change spring. Tuned with LANE_CHANGE_TIME: ~0.20 s to the next lane,
+## which is the "instant" the thumb expects. A softer spring reads as lag,
+## and lag was the actual complaint about the old tilt steering.
+const LATERAL_ACCELERATION := 165.0
+const LATERAL_DAMPING := 19.0
 const STUMBLE_TIME := 0.85
 const RECOVERY_INVULNERABILITY := 1.15
 const SMASH_MIN_SPEED := 18.0
@@ -43,14 +46,32 @@ const JUMP_VELOCITY := 12.6
 const GRAVITY := 38.0
 const SLIDE_TIME := 0.62
 const SWIPE_THRESHOLD := 46.0     # logical pixels
-## Gyroscope: rad/s of yaw before a lane change is committed. A natural wrist
-## flick peaks around 1.6-2.4 rad/s, so 0.55 catches intent without firing on
-## hand tremor (which stays under 0.2).
-const GYRO_THRESHOLD := 0.55
-const GYRO_COOLDOWN := 0.28
-## Accelerometer fallback for phones without a gyro (rare, but cheap to keep).
-const TILT_THRESHOLD := 0.22
-const TILT_COOLDOWN := 0.32
+## --- Sensor steering ---------------------------------------------------------
+## Two sensors can drive the lanes and they measure different things:
+##   * gravity / accelerometer = the *absolute* angle the phone is held at,
+##   * gyroscope               = the *rate* at which it is being turned.
+##
+## Tilt is primary. Holding the phone at 15 deg and having the runner move is
+## what a player expects ("I lean right, he goes right"), and it reacts on the
+## very first frame instead of waiting for a fast enough wrist flick. The gyro
+## only takes over on devices that report no gravity at all.
+##
+## Degrees of roll (about the screen normal) needed to commit a lane change.
+## Divided by Settings.gyro_sensitivity, clamped, so the slider works in both
+## directions (0.4x = calm, 2.5x = twitchy).
+const TILT_TRIGGER_DEG := 15.0
+## Falling back under this angle re-arms the next lane change: it stops a phone
+## resting at the trigger angle from sliding three lanes on its own.
+const TILT_RELEASE_DEG := 7.0
+## Held tilt keeps steering, like a d-pad: one extra lane per repeat.
+const TILT_REPEAT := 0.20
+## Gyro fallback: rad/s about the screen normal. 0.5 rad/s is a deliberate twist,
+## not the ~0.15 rad/s of a hand that is merely shaking.
+const GYRO_THRESHOLD := 0.50
+const GYRO_COOLDOWN := 0.16
+## Accelerometer fallback used when the gravity sensor is missing: same angles,
+## tighter cooldown because the sample is absolute (no drift).
+const TILT_ACCEL_COOLDOWN := 0.20
 
 const HERO_SCENE_PATH := "res://assets/models/hero/hero.tscn"
 
@@ -72,11 +93,13 @@ var _jump_buffer := 0.0
 var _touch_active := false
 var _touch_start := Vector2.ZERO
 var _touch_consumed := false
-var _tilt_baseline := 0.0
-var _tilt_cooldown := 0.0
-var _gyro_cooldown := 0.0
-## True when the device reports a live gyroscope (set after the first non-zero
-## sample). Keeps the accelerometer fallback from fighting a working gyro.
+## Neutral roll of the phone when the run started, in degrees (see _device_roll).
+var _tilt_baseline_deg := 0.0
+var _tilt_armed := true
+var _tilt_repeat := 0.0
+## True when the device reports a live gravity/gyroscope sensor (set after the
+## first non-zero sample). Keeps the fallbacks from fighting a working sensor.
+var sensor_kind: int = 0          # 0 = none yet, 1 = gravity, 2 = gyroscope
 var gyro_available := false
 var _gyro_seen := false
 var _stumble_timer := 0.0
@@ -248,7 +271,8 @@ func reset() -> void:
 	controlling = true
 	_slide_timer = 0.0
 	_jump_buffer = 0.0
-	_tilt_cooldown = 0.0
+	_tilt_armed = true
+	_tilt_repeat = 0.0
 	_stumble_timer = 0.0
 	_invulnerability_timer = 0.0
 	rotation = Vector3.ZERO
@@ -261,6 +285,8 @@ func reset() -> void:
 		_reset_animation_state()
 	if _blob:
 		_blob.visible = true
+	# Re-zero the holding angle on every run start: the player may have picked
+	# the phone up differently (lying in bed, standing, one-handed).
 	if Settings.tilt_enabled:
 		_calibrate_tilt()
 
@@ -432,54 +458,105 @@ func _update_vertical(delta: float) -> void:
 
 ## Lane control by device motion.
 ##
-## The gyroscope is preferred: it measures *rotation rate*, so a lane change is a
-## deliberate wrist flick and the value returns to zero afterwards (no drift, no
-## re-calibration). Phones without a gyro fall back to the accelerometer, where
-## the resting angle has to be calibrated and kept as a baseline.
+## Tilt is the primary input because it is *absolute*: the phone reports the
+## angle it is held at, so the runner reacts on the same frame the wrist moves
+## and keeps reacting while the phone stays leaned over. The gyroscope is a
+## fallback for devices that expose no gravity sensor.
+##
+## Sign convention (Android, portrait, screen facing the player):
+##   +X = right edge, +Y = top edge, +Z = out of the screen.
+## Leaning the phone to the right rotates it about +Z by a negative angle, so
+## the "up" vector the sensor reports (gravity is the *up* vector, not the pull)
+## gains a negative X. Hence `-x` everywhere below: positive roll == right.
 func _update_tilt(delta: float) -> void:
-	_tilt_cooldown = maxf(0.0, _tilt_cooldown - delta)
-	_gyro_cooldown = maxf(0.0, _gyro_cooldown - delta)
+	_tilt_repeat = maxf(0.0, _tilt_repeat - delta)
 	if not Settings.tilt_enabled or not controlling:
 		return
 
+	var sens := clampf(Settings.gyro_sensitivity, 0.4, 2.5)
+	var sign_dir := -1.0 if Settings.gyro_invert else 1.0
+	var trigger := clampf(TILT_TRIGGER_DEG / sens, 6.0, 32.0)
+	var release := minf(TILT_RELEASE_DEG * (trigger / TILT_TRIGGER_DEG), trigger * 0.7)
+
+	# 1. Absolute tilt (gravity sensor, or the accelerometer which reports the
+	# same "up" vector at rest). This is the responsive path.
+	var up := Input.get_gravity()
+	if up == Vector3.ZERO:
+		up = Input.get_accelerometer()
+	if up != Vector3.ZERO:
+		if sensor_kind != 1:
+			sensor_kind = 1
+			gyro_available = true
+			_tilt_baseline_deg = _device_roll(up)
+			_tilt_armed = true
+		var roll := (_device_roll(up) - _tilt_baseline_deg) * sign_dir
+		var magnitude := absf(roll)
+		if magnitude > trigger and _tilt_armed:
+			change_lane(1 if roll > 0.0 else -1)
+			_tilt_armed = false
+			_tilt_repeat = TILT_REPEAT
+		elif not _tilt_armed:
+			# Still leaning: keep steering at a fixed cadence, exactly like
+			# holding a d-pad. Returning towards neutral re-arms a single step.
+			if magnitude < release:
+				_tilt_armed = true
+			elif magnitude > trigger and _tilt_repeat <= 0.0:
+				change_lane(1 if roll > 0.0 else -1)
+				_tilt_repeat = TILT_REPEAT
+		return
+
+	# 2. No gravity at all: use the rotation rate about the screen normal. A
+	# quick twist is the only gesture left, so the threshold is a deliberate one.
 	var gyro := Input.get_gyroscope()
-	if gyro != Vector3.ZERO:
+	if gyro == Vector3.ZERO:
+		if not _gyro_seen:
+			return
+		gyro_available = true
+	else:
 		_gyro_seen = true
 		gyro_available = true
-	elif _gyro_seen:
-		# The sensor reported values before and now reads exactly zero: the
-		# phone is lying still, which is a valid state, not a missing sensor.
-		gyro_available = true
-
-	if gyro_available:
-		# Y is the axis that rotates the *screen plane*, i.e. tipping the phone
-		# left/right while holding it in portrait. Positive Y tilts the top of
-		# the device to the left on Android, hence the sign flip.
-		var rate := -gyro.y * Settings.gyro_sensitivity
-		if Settings.gyro_invert:
-			rate = -rate
-		if _gyro_cooldown <= 0.0 and absf(rate) > GYRO_THRESHOLD:
-			change_lane(1 if rate > 0.0 else -1)
-			_gyro_cooldown = GYRO_COOLDOWN
-		return
-
-	# Accelerometer fallback.
-	var accel := Input.get_accelerometer()
-	if accel == Vector3.ZERO:
-		return
-	var tilt := accel.x - _tilt_baseline
-	if _tilt_cooldown <= 0.0 and absf(tilt) > TILT_THRESHOLD:
-		change_lane(1 if tilt > 0.0 else -1)
-		_tilt_cooldown = TILT_COOLDOWN
+	if sensor_kind != 2:
+		sensor_kind = 2
+		_tilt_repeat = 0.0
+	var rate := -gyro.z * sens * sign_dir
+	if _tilt_repeat <= 0.0 and absf(rate) > GYRO_THRESHOLD:
+		change_lane(1 if rate > 0.0 else -1)
+		_tilt_repeat = GYRO_COOLDOWN
 
 
-## Re-zeroes the accelerometer baseline (called on start and from Settings when
-## the player enables tilt mid-run).
+## Roll of the phone about its screen normal, in degrees: 0 when the top edge
+## points at the sky, positive when the phone is leaned to the right.
+##
+## `up` is the sensor's "up" vector (~9.8 m/s² at rest). Z is folded into the
+## magnitude so a phone held reclined (or almost flat) still reads sensibly.
+func _device_roll(up: Vector3) -> float:
+	var plane := sqrt(up.y * up.y + up.z * up.z)
+	if plane < 0.05:
+		# Lying flat on a table: there is no roll to measure. Returning the same
+		# value as the baseline means "no steering" rather than a false lean.
+		return 0.0
+	return rad_to_deg(atan2(-up.x, plane))
+
+
+## Current sensor reading for the Settings screen and the CI state dump.
+func tilt_reading() -> String:
+	var up := Input.get_gravity()
+	if up == Vector3.ZERO:
+		up = Input.get_accelerometer()
+	return "roll=%.1f neutral=%.1f armed=%s sensor=%d" % [
+		_device_roll(up) if up != Vector3.ZERO else 0.0, _tilt_baseline_deg,
+		_tilt_armed, sensor_kind]
+
+
+## Re-zeroes the tilt baseline (called when a run starts and from Settings when
+## the player enables tilt mid-run), so the natural holding angle is "straight".
 func recalibrate_tilt() -> void:
-	var accel := Input.get_accelerometer()
-	_tilt_baseline = accel.x if accel != Vector3.ZERO else 0.0
-	_gyro_cooldown = 0.0
-	_tilt_cooldown = 0.0
+	var up := Input.get_gravity()
+	if up == Vector3.ZERO:
+		up = Input.get_accelerometer()
+	_tilt_baseline_deg = _device_roll(up) if up != Vector3.ZERO else 0.0
+	_tilt_armed = true
+	_tilt_repeat = 0.0
 
 
 func _calibrate_tilt() -> void:
@@ -551,9 +628,9 @@ func buttons_enabled() -> bool:
 ## Hardware sensor report for the Settings screen ("gyro detected") and for the
 ## CI screenshot state dump.
 func sensor_debug() -> String:
-	return "gyro_available=%s gyro=%s accel=%s lane_control=%d" % [
-		gyro_available, Input.get_gyroscope(), Input.get_accelerometer(),
-		Settings.lane_control]
+	return "sensor=%s gravity=%s gyro=%s accel=%s lane_control=%d" % [
+		gyro_available, Input.get_gravity(), Input.get_gyroscope(),
+		Input.get_accelerometer(), Settings.lane_control]
 
 
 ## Thin wrapper used by the UI's big touch pad: one entry point for gestures.

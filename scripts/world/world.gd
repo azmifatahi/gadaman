@@ -15,6 +15,10 @@ extends Node3D
 
 var _environment: Environment
 var _suit_probe: ReflectionProbe
+## Second, shadowless directional light: the warm bounce off the dusty street.
+## Without it every wall that faces away from the low sun went black, which is
+## what made the photographic facades read as flat cardboard.
+var _bounce: DirectionalLight3D
 
 
 func _ready() -> void:
@@ -44,6 +48,7 @@ func _ready() -> void:
 
 	_to_menu()
 	Audio.play_music()
+	_warm_up()
 	# First launch: explain the four gestures before the run starts. Automated
 	# sessions (CI smoke test / screenshots) skip it so they measure the game.
 	var automated := "--smoke" in OS.get_cmdline_user_args() or \
@@ -55,6 +60,24 @@ func _ready() -> void:
 		_run_smoke_test()
 	if "--screenshot" in OS.get_cmdline_user_args():
 		_run_screenshot_session()
+
+
+# ---------------------------------------------------------------------------
+# Boot warm-up
+# ---------------------------------------------------------------------------
+## Everything expensive is built while the menu is up: the 21 district meshes,
+## the obstacle + cup meshes, and every photographic material (which is what
+## actually decodes the JPEGs and compiles the shaders). Two frames are awaited
+## first so `Perf` has resolved the hardware tier and its density - building
+## with the wrong density would just have to be thrown away.
+func _warm_up() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var started := Time.get_ticks_msec()
+	var materials := MeshKit.warm_materials()
+	track.warm_for_quality()
+	print("[Warmup] %d materials, %s, %d ms" % [
+		materials, SegmentBuilder.stats(), Time.get_ticks_msec() - started])
 
 
 # ---------------------------------------------------------------------------
@@ -81,11 +104,28 @@ func _setup_lighting() -> void:
 	# Low, warm sun: long shadows across the asphalt, sun disc near the horizon.
 	sun.rotation_degrees = Vector3(-26.0, -142.0, 0.0)
 	sun.light_color = Color("#ffd0a0")
-	sun.light_energy = 1.45
+	sun.light_energy = 1.55
 	sun.light_specular = 0.72
+	# A 1.1 deg sun disc gives soft penumbrae on the awnings and the poles; a
+	# point sun is what makes procedural scenes look like clip-art.
 	sun.light_angular_distance = 1.1
-	Perf.apply_to_sun(sun, camera_rig)
-	Perf.apply_to_camera(camera_rig)
+	_perf_sun()
+
+	# Bounce fill. The street is sand and pale concrete, so in reality a lot of
+	# light comes back up from the ground into every shaded wall. A second,
+	# shadowless light pointing slightly upward fakes that in one draw call and
+	# is the single biggest "this looks photographed" change in the scene.
+	_bounce = DirectionalLight3D.new()
+	_bounce.name = "BounceFill"
+	_bounce.light_color = Color("#ffcf9e")
+	_bounce.light_energy = 0.42
+	_bounce.light_specular = 0.0
+	_bounce.shadow_enabled = false
+	_bounce.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+	# Opposite side of the sun (sun yaw -142 deg) and tilted *up* (positive X
+	# rotation points the light at the ground from below).
+	_bounce.rotation_degrees = Vector3(11.0, 42.0, 0.0)
+	add_child(_bounce)
 
 
 ## 2:1 equirectangular panorama photographed on the Blue Nile bank.
@@ -123,6 +163,13 @@ func _apply_sky(photo_sky: PanoramaSkyMaterial) -> void:
 			_setup_skyline()
 	elif skyline != null:
 		skyline.queue_free()
+
+
+## Sun settings that must survive a quality change (Perf only touches shadows
+## and distance, but re-applying them is what keeps the two paths in sync).
+func _perf_sun() -> void:
+	Perf.apply_to_sun(sun, camera_rig)
+	Perf.apply_to_camera(camera_rig)
 
 
 func _make_photo_sky() -> PanoramaSkyMaterial:
@@ -340,6 +387,30 @@ func _run_smoke_test() -> void:
 			return
 		player.slide()
 		player.change_lane(1 if i % 2 == 0 else -1)
+
+	# --- soak -------------------------------------------------------------
+	# Six kilometres of track in a fraction of a second. That is ~75 segment
+	# recycles and a few thousand prop respawns, i.e. exactly what a long run
+	# does - and the assertion is that it allocates no meshes and that the
+	# heap does not grow. This is the regression test for "the game freezes
+	# after a distance".
+	await get_tree().process_frame
+	var mem_before := OS.get_static_memory_usage()
+	track.speed = TrackManager.MAX_SPEED
+	track.soak(6000.0, 1.0)
+	await get_tree().process_frame
+	var mem_after := OS.get_static_memory_usage()
+	var growth_mb := float(mem_after - mem_before) / (1024.0 * 1024.0)
+	var builds := SegmentBuilder.builds_in_run
+	print("SOAK %s" % track.debug_stats())
+	print("SOAK mem_before=%.1fMB mem_after=%.1fMB growth=%.2fMB builds_in_run=%d" % [
+		float(mem_before) / (1024.0 * 1024.0), float(mem_after) / (1024.0 * 1024.0),
+		growth_mb, builds])
+	if builds == 0 and growth_mb < 16.0:
+		print("SOAK_OK")
+	else:
+		print("SOAK_FAIL builds_in_run=%d growth=%.2fMB" % [builds, growth_mb])
+
 	Game.end_run("smoke")
 	await get_tree().create_timer(0.9).timeout
 	print("SMOKE_OK score=%d distance=%d cups=%d props=%d cups_live=%d fps=%d" % [

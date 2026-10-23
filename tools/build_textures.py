@@ -28,7 +28,7 @@ from PIL import ImageDraw
 import os
 import sys
 
-from PIL import Image, ImageFilter, ImageChops, ImageStat
+from PIL import Image, ImageFilter, ImageChops, ImageStat, ImageOps
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "art_src")
@@ -543,6 +543,21 @@ def build_road() -> None:
     save(roughness_from(narrow), "asphalt_photo_rough.png")
 
 
+def build_grain() -> None:
+    """Multiplicative micro-grain for the asphalt.
+
+    The road photo is tiled every 2.4 m, which at 40 m looks like wallpaper.
+    A high-pass of the same photo, centred on mid-grey and multiplied on top,
+    keeps the colour but replaces the repeat with per-pixel grit.
+    """
+    print("grain")
+    src = cover_crop(load("asphalt.jpg").convert("L"), (DETAIL, DETAIL))
+    blur = src.filter(ImageFilter.GaussianBlur(9))
+    diff = ImageOps.autocontrast(ImageChops.difference(src, blur), cutoff=1)
+    grain = diff.point(lambda v: 116 + int(v * 0.30))
+    save(grain.convert("RGB"), "asphalt_grain.jpg", quality=86)
+
+
 def build_pavement() -> None:
     print("pavement")
     pav = mirror_tile(cover_crop(load("pavement.jpg"), (ALBEDO, ALBEDO)))
@@ -617,6 +632,7 @@ def main(argv: list[str]) -> int:
             "sky_khartoum.jpg", "skyline_khartoum.png", "menu_bg.jpg",
             "asphalt_photo.jpg",
             "asphalt_photo_normal.png", "asphalt_photo_rough.png",
+            "asphalt_grain.jpg",
             "pavement_photo.jpg", "pavement_photo_normal.png", "water_photo.jpg",
             "facade_shops.jpg", "facade_ochre.jpg", "facade_plaster.jpg",
             "facade_atlas.jpg",
@@ -631,6 +647,7 @@ def main(argv: list[str]) -> int:
 
     build_sky()
     build_road()
+    build_grain()
     build_pavement()
     build_water()
     build_facades()

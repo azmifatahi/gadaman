@@ -66,6 +66,10 @@ var _objects_root: Node3D
 var district: int = -1
 ## The variant currently shown, so a district change can rebuild immediately.
 var _current_variant: int = 0
+## Density the visible chunks were built with; a quality refresh rebuilds only
+## when it actually changes.
+var _quality_density: float = -1.0
+var _quality_refresh_running: bool = false
 
 
 func _ready() -> void:
@@ -131,7 +135,32 @@ func start_delivery(kind: int, target_distance: float = 850.0, time_limit: float
 	_begin_run()
 
 
+## Builds every district mesh / obstacle mesh the run can possibly need, *before*
+## `running` flips to true. This is the fix for the freeze that appeared "after
+## a distance": the landmark layouts (Bahri 250 m, Mac Nimir 400 m, Shambat
+## 650 m) used to be generated on the frame they first scrolled in, which is a
+## multi-second main-thread stall on a phone - and the first frame that draws a
+## photographic material also pays for its shader compile.
+##
+## Nothing here runs more than once per density: every call after the first is a
+## dictionary lookup, which is why this is cheap enough to call on every start.
+func ensure_warm() -> void:
+	var built := SegmentBuilder.warm_all(Perf.prop_density)
+	var props := PropLibrary.warm_all()
+	if built > 0 or props > 0:
+		print("[TrackManager] warm-up: %d street meshes + %d prop meshes" % [built, props])
+	SegmentBuilder.run_guard = true
+
+
+## Builds every district mesh up-front without starting a run (the boot path,
+## called from World._warm_up once the hardware tier is known).
+func warm_for_quality() -> void:
+	SegmentBuilder.warm_all(Perf.prop_density)
+	PropLibrary.warm_all()
+
+
 func _begin_run() -> void:
+	ensure_warm()
 	reset_world()
 	speed = BASE_SPEED
 	distance = 0.0
@@ -492,11 +521,60 @@ func refresh_photo_materials() -> void:
 
 
 ## Re-apply quality-dependent visuals (density, shadow casting, shader variant).
+##
+## A density change invalidates every cached district mesh, so this is spread
+## over frames (one chunk per frame) instead of re-generating six chunks - and
+## therefore stalling the whole app - inside a single frame. `process_frame`
+## keeps firing while the tree is paused, which is exactly when the player flips
+## the preset (the settings panel pauses the game).
 func refresh_quality() -> void:
+	var density: float = Perf.prop_density
+	if _quality_refresh_running and is_equal_approx(density, _quality_density):
+		return
+	_quality_density = density
+	_quality_refresh_running = true
+	# Warming is intentional work, not a mid-run allocation bug: keep it out of
+	# the guard counter the soak test asserts on.
+	var guard := SegmentBuilder.run_guard
+	SegmentBuilder.run_guard = false
+	SegmentBuilder.warm_all(density)
+	SegmentBuilder.run_guard = guard
 	for seg in _segments:
-		seg.apply(seg.variant, seg.mesh_slot, Perf.prop_density)
+		seg.apply(seg.variant, seg.mesh_slot, density)
+		await get_tree().process_frame
 	for prop in _active_props:
 		prop.apply_quality()
+	# Only the new density is still reachable: free the rest.
+	SegmentBuilder.prune_density(density)
+	_quality_refresh_running = false
+
+
+## One-line runtime state for the CI soak test and bug reports.
+func debug_stats() -> String:
+	return "distance=%.0f speed=%.1f segments=%d props=%d cups=%d %s" % [
+		distance, speed, _segments.size(), _active_props.size(),
+		_active_cups.size(), SegmentBuilder.stats()]
+
+
+## Advances the world by `meters` without waiting for real time.
+##
+## Used by the CI soak test: 6 km of track in a fraction of a second exercises
+## hundreds of segment recycles and thousands of prop respawns, which is the
+## only way to prove "a long run allocates nothing" on a build server.
+func soak(meters: float, step: float = 0.5) -> void:
+	var remaining := meters
+	while remaining > 0.0:
+		var dt := minf(step, remaining)
+		var travel := speed * dt
+		distance += travel
+		_scroll_segments(travel)
+		_scroll_objects(travel)
+		_spawn_cursor += travel
+		var guard := 0
+		while _spawn_cursor > SPAWN_FRONT and guard < 8:
+			_spawn_row()
+			guard += 1
+		remaining -= dt
 
 
 func active_prop_count() -> int:

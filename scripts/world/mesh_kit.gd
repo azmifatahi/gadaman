@@ -415,6 +415,24 @@ static func _photo_mat(path: String, tile: Vector2, roughness: float,
 ## Real Khartoum asphalt: albedo + normal + roughness photographed in the city.
 ## The UVs are authored in metres (see add_uv_ground) so `uv1_scale` only has to
 ## convert metres into "one photo tile".
+## Instantiates every material the street can use, so their textures are loaded
+## and decoded at boot instead of during the first frame that needs them (a
+## 1024x1024 JPEG decode on the main thread is a visible hitch on a phone).
+static func warm_materials() -> int:
+	var made := 0
+	for m: StandardMaterial3D in [
+			vertex_material(), vertex_material_cheap(), road_material(),
+			concrete_material(), sand_material(), glass_material(),
+			facade_flat_material(), water_flat_material(), steel_flat_material(),
+			asphalt_photo_material(), pavement_photo_material(),
+			facade_material(0), facade_material(1), facade_material(2),
+			water_photo_material(), steel_truss_material(),
+			concrete_photo_material()]:
+		if m != null:
+			made += 1
+	return made
+
+
 static func asphalt_photo_material() -> StandardMaterial3D:
 	if not photo_art_enabled():
 		return road_material()
@@ -423,8 +441,19 @@ static func asphalt_photo_material() -> StandardMaterial3D:
 				Vector2(1.0 / 2.4, 1.0 / 2.4), 0.82)
 		m.normal_enabled = not low_tier()
 		m.normal_texture = load("res://assets/textures/asphalt_photo_normal.png")
-		m.normal_scale = 0.85
+		m.normal_scale = 1.15
 		m.roughness_texture = load("res://assets/textures/asphalt_photo_rough.png")
+		# Micro-grain multiplied on top of the photo. The albedo tiles every
+		# 2.4 m; the grit hides that repeat and gives the road a surface the sun
+		# can bite into, which is what the flat grey slab was missing.
+		const GRAIN := "res://assets/textures/asphalt_grain.jpg"
+		if ResourceLoader.exists(GRAIN):
+			m.detail_enabled = true
+			m.detail_albedo = load(GRAIN)
+			m.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
+			m.detail_uv = BaseMaterial3D.DETAIL_UV_1
+		# A touch of warmth keeps the grain from cooling the asphalt down.
+		m.albedo_color = Color(0.92, 0.90, 0.88)
 		_mat_road_photo = m
 	return _mat_road_photo
 

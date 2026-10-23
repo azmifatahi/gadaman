@@ -302,8 +302,8 @@ func apply_to_environment(env: Environment) -> void:
 	# job of this pass is to *remove* the remaining cartoon saturation and add
 	# back a little film contrast, not to punch the colours up.
 	env.adjustment_enabled = tier != Tier.LOW
-	env.adjustment_saturation = 0.92
-	env.adjustment_contrast = 1.06
+	env.adjustment_saturation = 0.94
+	env.adjustment_contrast = 1.10
 	env.adjustment_brightness = 1.0
 
 

@@ -62,6 +62,19 @@ const PALETTE := {
 
 static var _cache: Dictionary = {}
 
+## --- Warm-up / stall guard --------------------------------------------------
+## Building one district means ten SurfaceTool passes, ten `commit()` calls and
+## a surface copy each: 5-30 ms on a desktop, and a *visible freeze* on a cheap
+## phone. It used to run the first time a layout appeared, which for the
+## landmark districts is 250 m (Bahri), 400 m (Mac Nimir) and 650 m (Shambat)
+## into the run - the exact "the game hangs after a distance" report. Everything
+## is therefore built up-front at boot (`warm_all`) and `run_guard` turns any
+## build that still happens mid-run into a countable bug instead of a hitch.
+static var build_count: int = 0
+static var builds_in_run: int = 0
+static var build_ms_total: float = 0.0
+static var run_guard: bool = false
+
 ## Surface order used by every segment mesh. TrackSegment maps these names to
 ## materials; adding a surface here is all it takes to give the street a new
 ## photographic material.
@@ -69,12 +82,51 @@ const SURFACES := ["road", "walk", "art", "ground", "facade", "facade_b",
 	"facade_c", "water", "steel", "concrete"]
 
 
+## Cache identity of one built district. The variant is normalised first so a
+## caller can pass any integer (a district id, an rng roll) without growing the
+## cache with duplicates.
+static func cache_key(variant: int, slot: int, density: float) -> String:
+	variant = posmod(variant, VARIANT_COUNT)
+	slot = posmod(slot, CACHE_SLOTS)
+	return "%d_%d_%.2f" % [variant, slot, density]
+
+
+static func has(variant: int, slot: int, density: float) -> bool:
+	return _cache.has(cache_key(posmod(variant, VARIANT_COUNT),
+			posmod(slot, CACHE_SLOTS), density))
+
+
+## Builds every (layout, cache slot) pair for one density and returns how many
+## meshes were actually created. Call it once the hardware tier is known: after
+## this, `build()` is a dictionary lookup for the rest of the session.
+static func warm_all(density: float) -> int:
+	var built := 0
+	for variant in range(VARIANT_COUNT):
+		for slot in range(CACHE_SLOTS):
+			if _cache.has(cache_key(variant, slot, density)):
+				continue
+			build(variant, slot, density)
+			built += 1
+	return built
+
+
+static func stats() -> String:
+	return "meshes=%d builds=%d in_run=%d build_ms=%.0f guard=%s" % [
+		_cache.size(), build_count, builds_in_run, build_ms_total, run_guard]
+
+
 ## Returns an ArrayMesh whose surfaces follow `SURFACES` (empty surfaces are
 ## omitted, and `mesh.set_meta("surfaces", [...])` records what is present).
 static func build(variant: int, slot: int, density: float) -> ArrayMesh:
-	var key := "%d_%d_%.2f" % [variant, slot, density]
+	variant = posmod(variant, VARIANT_COUNT)
+	slot = posmod(slot, CACHE_SLOTS)
+	var key := cache_key(variant, slot, density)
 	if _cache.has(key):
 		return _cache[key]
+	var started := Time.get_ticks_usec()
+	if run_guard:
+		builds_in_run += 1
+		push_warning("[SegmentBuilder] building '%s' while a run is active" % key)
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7919 * (slot + 1) + 104729 * variant
@@ -127,11 +179,26 @@ static func build(variant: int, slot: int, density: float) -> ArrayMesh:
 		present.append(name)
 	mesh.set_meta("surfaces", present)
 	_cache[key] = mesh
+	build_count += 1
+	build_ms_total += float(Time.get_ticks_usec() - started) / 1000.0
 	return mesh
 
 
 static func clear_cache() -> void:
 	_cache.clear()
+
+
+## Drops every cached mesh built for a *different* quality density. A preset
+## change would otherwise leave 21 unused meshes of the old density alive for
+## the rest of the session, which is real GPU memory on a 2 GB phone.
+static func prune_density(keep: float) -> int:
+	var suffix := "_%.2f" % keep
+	var dropped := 0
+	for key in _cache.keys():
+		if not String(key).ends_with(suffix):
+			_cache.erase(key)
+			dropped += 1
+	return dropped
 
 
 ## Pick one of the three photographed shopfronts, so a street is not wallpapered
@@ -189,12 +256,14 @@ static func _build_road(st: SurfaceTool, paint_st: SurfaceTool,
 	MeshKit.add_uv_ground(st, Vector3(-ROAD_HALF, 0, h), Vector3(ROAD_HALF, 0, h),
 			Vector3(ROAD_HALF, 0, -h), Vector3(-ROAD_HALF, 0, -h), 2.4)
 	# Dashed lane dividers between the three lanes (x = +-1.2).
-	var paint := Color("#e8e3d3")
+	# Worn thermoplastic, not studio white: real Khartoum paint is grey-yellow
+	# after a season of dust and tyres.
+	var paint := Color("#cfc7b4")
 	var z := -h
 	while z < h:
 		for lane_edge: float in [-1.2, 1.2]:
 			_add_flat_box(paint_st, Vector3(lane_edge, 0.03, z + 1.5),
-					Vector3(0.16, 0.012, 2.6), paint)
+					Vector3(0.15, 0.012, 2.6), paint)
 		z += 5.6
 	# Occasional crosswalk / speed bump paint for rhythm.
 	if rng.randf() < 0.5:
@@ -454,7 +523,15 @@ static func _stall(st: SurfaceTool, side: float, z: float,
 		for sz: float in [-1.25, 1.25]:
 			MeshKit.add_box(st, Vector3(x + sx, 1.4, z + sz), Vector3(0.07, 2.2, 0.07),
 					PALETTE["metal"])
-	MeshKit.add_box(st, Vector3(x, 2.5, z), Vector3(2.4, 0.1, 3.0), cloth)
+	# Striped canvas: six slats across the 2.4 m span, alternating the stall
+	# colour with sun-bleached cotton. A single flat slab reads as a plastic
+	# sheet; the slats catch the low sun one at a time.
+	for i in 6:
+		var sw := 0.4
+		var sx := x - 1.2 + sw * 0.5 + float(i) * sw
+		var slat: Color = cloth if i % 2 == 0 else cloth.lightened(0.24)
+		MeshKit.add_box(st, Vector3(sx, 2.5 - float(i % 2) * 0.012, z),
+				Vector3(sw - 0.015, 0.1, 3.0), slat)
 	MeshKit.add_box(st, Vector3(x - side * 0.9, 2.32, z), Vector3(0.9, 0.06, 3.0),
 			cloth.darkened(0.18))
 	# Goods: crates, sacks, spice bowls.
