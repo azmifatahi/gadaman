@@ -23,6 +23,8 @@ const MATERIALS := {
 	"steel": "steel_truss_material",
 	"concrete": "concrete_photo_material",
 	"ground": "sand_material",
+	"leaf": "palm_frond_material",
+	"leaves": "leaf_cluster_material",
 }
 
 var variant: int = 0
@@ -87,6 +89,12 @@ func _material_for(surface_name: String) -> Material:
 			return MeshKit.concrete_photo_material()
 		"ground":
 			return MeshKit.sand_material()
+		"leaf":
+			# Alpha-scissor foliage: cheap on every tier, and the only surface
+			# where the photo cut-out matters more than the lighting cost.
+			return MeshKit.palm_frond_material()
+		"leaves":
+			return MeshKit.leaf_cluster_material()
 	return MeshKit.vertex_material()
 
 

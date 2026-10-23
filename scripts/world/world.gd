@@ -15,6 +15,10 @@ extends Node3D
 
 var _environment: Environment
 var _suit_probe: ReflectionProbe
+## Second, shadowless directional light: the warm bounce off the dusty street.
+## Without it every wall that faces away from the low sun went black, which is
+## what made the photographic facades read as flat cardboard.
+var _bounce: DirectionalLight3D
 
 
 func _ready() -> void:
@@ -44,6 +48,7 @@ func _ready() -> void:
 
 	_to_menu()
 	Audio.play_music()
+	_warm_up()
 	# First launch: explain the four gestures before the run starts. Automated
 	# sessions (CI smoke test / screenshots) skip it so they measure the game.
 	var automated := "--smoke" in OS.get_cmdline_user_args() or \
@@ -55,6 +60,79 @@ func _ready() -> void:
 		_run_smoke_test()
 	if "--screenshot" in OS.get_cmdline_user_args():
 		_run_screenshot_session()
+
+
+# ---------------------------------------------------------------------------
+# Boot warm-up
+# ---------------------------------------------------------------------------
+## Everything expensive is built while the menu is up: the 21 district meshes,
+## the obstacle + cup meshes, and every photographic material (which is what
+## actually decodes the JPEGs and compiles the shaders). Two frames are awaited
+## first so `Perf` has resolved the hardware tier and its density - building
+## with the wrong density would just have to be thrown away.
+func _warm_up() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var started := Time.get_ticks_msec()
+	var materials := MeshKit.warm_materials()
+	track.warm_for_quality()
+	print("[Warmup] %d materials, %s, %d ms" % [
+		materials, SegmentBuilder.stats(), Time.get_ticks_msec() - started])
+	await _warm_shaders()
+
+
+## Draws every material once, off to the side of the camera, behind the menu.
+##
+## This is the part of the freeze that has nothing to do with meshes: on Android
+## GLES3 a *shader* is compiled the first time a material is drawn, and the
+## photographic surfaces (asphalt with normal + roughness, water, truss steel,
+## the three facades, the foliage cut-outs) each cost a visible stall - a second
+## or more on a mid-range phone. They all first appeared 250-650 m into a run,
+## which is exactly "the game hangs after a distance".
+##
+## One tiny quad per material for two frames compiles all of them while the menu
+## is still up, so a run never compiles a shader again.
+func _warm_shaders() -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	var cam: Camera3D = get_viewport().get_camera_3d()
+	if cam == null:
+		return
+	var mats: Array[Material] = []
+	for m: StandardMaterial3D in MeshKit.materials():
+		if m != null:
+			mats.append(m)
+	mats.append_array(Collectible.warm_materials())
+	for child in fx.get_children():
+		var particles := child as GPUParticles3D
+		if particles != null and particles.draw_pass_1 != null:
+			var pm: Material = particles.draw_pass_1.material
+			if pm != null:
+				mats.append(pm)
+	var skyline := get_node_or_null("KhartoumSkyline") as MeshInstance3D
+	if skyline != null and skyline.material_override != null:
+		mats.append(skyline.material_override)
+
+	var rig := Node3D.new()
+	rig.name = "ShaderWarmup"
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.06, 0.06)
+	for i in mats.size():
+		var mi := MeshInstance3D.new()
+		mi.mesh = quad
+		mi.material_override = mats[i]
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.position = Vector3(-0.12 + 0.008 * float(i), -0.06, -0.35)
+		rig.add_child(mi)
+	cam.add_child(rig)
+	# Two full frames: the first queues the draw, the second guarantees the
+	# renderer actually ran the pipelines with the menu still covering them.
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	rig.queue_free()
+	print("[Warmup] %d shader materials drawn" % mats.size())
 
 
 # ---------------------------------------------------------------------------
@@ -81,11 +159,28 @@ func _setup_lighting() -> void:
 	# Low, warm sun: long shadows across the asphalt, sun disc near the horizon.
 	sun.rotation_degrees = Vector3(-26.0, -142.0, 0.0)
 	sun.light_color = Color("#ffd0a0")
-	sun.light_energy = 1.45
+	sun.light_energy = 1.55
 	sun.light_specular = 0.72
+	# A 1.1 deg sun disc gives soft penumbrae on the awnings and the poles; a
+	# point sun is what makes procedural scenes look like clip-art.
 	sun.light_angular_distance = 1.1
-	Perf.apply_to_sun(sun, camera_rig)
-	Perf.apply_to_camera(camera_rig)
+	_perf_sun()
+
+	# Bounce fill. The street is sand and pale concrete, so in reality a lot of
+	# light comes back up from the ground into every shaded wall. A second,
+	# shadowless light pointing slightly upward fakes that in one draw call and
+	# is the single biggest "this looks photographed" change in the scene.
+	_bounce = DirectionalLight3D.new()
+	_bounce.name = "BounceFill"
+	_bounce.light_color = Color("#ffcf9e")
+	_bounce.light_energy = 0.42
+	_bounce.light_specular = 0.0
+	_bounce.shadow_enabled = false
+	_bounce.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+	# Opposite side of the sun (sun yaw -142 deg) and tilted *up* (positive X
+	# rotation points the light at the ground from below).
+	_bounce.rotation_degrees = Vector3(11.0, 42.0, 0.0)
+	add_child(_bounce)
 
 
 ## 2:1 equirectangular panorama photographed on the Blue Nile bank.
@@ -123,6 +218,13 @@ func _apply_sky(photo_sky: PanoramaSkyMaterial) -> void:
 			_setup_skyline()
 	elif skyline != null:
 		skyline.queue_free()
+
+
+## Sun settings that must survive a quality change (Perf only touches shadows
+## and distance, but re-applying them is what keeps the two paths in sync).
+func _perf_sun() -> void:
+	Perf.apply_to_sun(sun, camera_rig)
+	Perf.apply_to_camera(camera_rig)
 
 
 func _make_photo_sky() -> PanoramaSkyMaterial:
@@ -340,6 +442,30 @@ func _run_smoke_test() -> void:
 			return
 		player.slide()
 		player.change_lane(1 if i % 2 == 0 else -1)
+
+	# --- soak -------------------------------------------------------------
+	# ~100 minutes of running at top speed (≈160 km of track, a couple of
+	# thousand segment recycles and tens of thousands of prop respawns) in a
+	# fraction of a second. The assertion is that it allocates no meshes and
+	# that the heap does not grow: the regression test for "the game freezes
+	# after a distance".
+	await get_tree().process_frame
+	var mem_before := OS.get_static_memory_usage()
+	track.speed = TrackManager.MAX_SPEED
+	track.soak(6000.0, 1.0)
+	await get_tree().process_frame
+	var mem_after := OS.get_static_memory_usage()
+	var growth_mb := float(mem_after - mem_before) / (1024.0 * 1024.0)
+	var builds := SegmentBuilder.builds_in_run
+	print("SOAK %s" % track.debug_stats())
+	print("SOAK mem_before=%.1fMB mem_after=%.1fMB growth=%.2fMB builds_in_run=%d" % [
+		float(mem_before) / (1024.0 * 1024.0), float(mem_after) / (1024.0 * 1024.0),
+		growth_mb, builds])
+	if builds == 0 and growth_mb < 16.0:
+		print("SOAK_OK")
+	else:
+		print("SOAK_FAIL builds_in_run=%d growth=%.2fMB" % [builds, growth_mb])
+
 	Game.end_run("smoke")
 	await get_tree().create_timer(0.9).timeout
 	print("SMOKE_OK score=%d distance=%d cups=%d props=%d cups_live=%d fps=%d" % [
@@ -373,6 +499,11 @@ func _run_screenshot_session() -> void:
 	await get_tree().create_timer(0.4).timeout
 	await _save_shot("03c_buttons")
 	Settings.set_show_buttons(false)
+	# Corniche: the Nile palms. Their alpha fronds are the newest art, so they
+	# get their own capture instead of hiding behind the market.
+	Settings.set_district(2)
+	await get_tree().create_timer(0.9).timeout
+	await _save_shot("03d_corniche")
 	Settings.set_district(-1)
 	await get_tree().create_timer(0.4).timeout
 	player.jump()

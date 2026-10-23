@@ -124,7 +124,16 @@ jobs:
             tail -n 12 smoke.log | sed 's/^/::error::/'
             exit 1
           fi
-          echo "Smoke test passed."
+          # Soak: ~100 minutes of running (≈160 km) without allocating a
+          # single mesh and without the heap growing. Regression test for the
+          # freeze that used to hit players after a few hundred metres.
+          grep -a "SOAK" smoke.log | while IFS= read -r line; do echo "::notice title=soak::${line}"; done
+          if ! grep -q "SOAK_OK" smoke.log; then
+            echo "::error::Soak test failed - long runs still allocate or leak (no SOAK_OK)."
+            grep -a "SOAK" smoke.log | head -n 6 | sed 's/^/::error::/'
+            exit 1
+          fi
+          echo "Smoke + soak tests passed."
 
       - name: Verify streets + settings (strict)
         run: |
@@ -489,7 +498,7 @@ jobs:
             godot --rendering-driver opengl3 --resolution 1280x720 -- --screenshot 2>&1 | tee shots.log || true
           # Annotations instead of plain log lines: the raw logs are served from
           # blob storage that some environments cannot reach.
-          grep -aE "SHOT|SCREENSHOTS_DONE|SCRIPT ERROR|Parse Error|ERROR:" shots.log \
+          grep -aE "SHOT|SCREENSHOTS_DONE|Warmup|SCRIPT ERROR|Parse Error|ERROR:" shots.log \
             | tail -n 25 | while IFS= read -r line; do echo "::notice title=shots::${line}"; done
           if ! grep -q "SCREENSHOTS_DONE" shots.log; then
             grep -aE "SCRIPT ERROR|Parse Error|ERROR:|Cannot|Invalid" shots.log | head -n 10 \

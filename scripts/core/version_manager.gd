@@ -6,7 +6,7 @@
 ## "What's new" popup instead of surprising the player.
 extends Node
 
-const CURRENT_VERSION := "1.3.0"
+const CURRENT_VERSION := "1.4.0"
 const VERSION_FILE := "user://version.cfg"
 
 var previous_version: String = ""
@@ -57,6 +57,12 @@ func _build_notes() -> void:
 		update_notes.append(_t("update.photo_streets"))
 		update_notes.append(_t("update.gyro"))
 		update_notes.append(_t("update.buttons"))
+	# 1.4.0 leads with the two complaints that were actually blocking play:
+	# the hang after a distance, and steering that felt inverted and slow.
+	if _version_less(previous_version, "1.4.0"):
+		update_notes.append(_t("update.tilt_fix"))
+		update_notes.append(_t("update.smooth"))
+		update_notes.append(_t("update.look"))
 
 
 func _t(key: String) -> String:

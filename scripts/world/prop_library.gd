@@ -99,6 +99,24 @@ const C := {
 }
 
 
+## Builds every obstacle and cup mesh up-front. The pool only ever swaps
+## references to these, so after this call a run allocates no geometry at all -
+## including the first rows of a fresh run, which used to be built on the frame
+## the player tapped "play".
+static func warm_all() -> int:
+	var built := 0
+	for kind in range(KIND_COUNT):
+		if not _mesh_cache.has(kind):
+			obstacle_mesh(kind)
+			built += 1
+	for kind in range(CUP_COLORS.size()):
+		if not _cup_mesh_cache.has(kind):
+			cup_mesh(kind)
+			built += 1
+		cup_sprite_material(kind)
+	return built
+
+
 static func info(kind: int) -> Dictionary:
 	return DATA.get(kind, DATA[BARRIER])
 

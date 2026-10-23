@@ -62,19 +62,71 @@ const PALETTE := {
 
 static var _cache: Dictionary = {}
 
+## --- Warm-up / stall guard --------------------------------------------------
+## Building one district means ten SurfaceTool passes, ten `commit()` calls and
+## a surface copy each: 5-30 ms on a desktop, and a *visible freeze* on a cheap
+## phone. It used to run the first time a layout appeared, which for the
+## landmark districts is 250 m (Bahri), 400 m (Mac Nimir) and 650 m (Shambat)
+## into the run - the exact "the game hangs after a distance" report. Everything
+## is therefore built up-front at boot (`warm_all`) and `run_guard` turns any
+## build that still happens mid-run into a countable bug instead of a hitch.
+static var build_count: int = 0
+static var builds_in_run: int = 0
+static var build_ms_total: float = 0.0
+static var run_guard: bool = false
+
 ## Surface order used by every segment mesh. TrackSegment maps these names to
 ## materials; adding a surface here is all it takes to give the street a new
 ## photographic material.
 const SURFACES := ["road", "walk", "art", "ground", "facade", "facade_b",
-	"facade_c", "water", "steel", "concrete"]
+	"facade_c", "water", "steel", "concrete", "leaf", "leaves"]
+
+
+## Cache identity of one built district. The variant is normalised first so a
+## caller can pass any integer (a district id, an rng roll) without growing the
+## cache with duplicates.
+static func cache_key(variant: int, slot: int, density: float) -> String:
+	variant = posmod(variant, VARIANT_COUNT)
+	slot = posmod(slot, CACHE_SLOTS)
+	return "%d_%d_%.2f" % [variant, slot, density]
+
+
+static func has(variant: int, slot: int, density: float) -> bool:
+	return _cache.has(cache_key(posmod(variant, VARIANT_COUNT),
+			posmod(slot, CACHE_SLOTS), density))
+
+
+## Builds every (layout, cache slot) pair for one density and returns how many
+## meshes were actually created. Call it once the hardware tier is known: after
+## this, `build()` is a dictionary lookup for the rest of the session.
+static func warm_all(density: float) -> int:
+	var built := 0
+	for variant in range(VARIANT_COUNT):
+		for slot in range(CACHE_SLOTS):
+			if _cache.has(cache_key(variant, slot, density)):
+				continue
+			build(variant, slot, density)
+			built += 1
+	return built
+
+
+static func stats() -> String:
+	return "meshes=%d builds=%d in_run=%d build_ms=%.0f guard=%s" % [
+		_cache.size(), build_count, builds_in_run, build_ms_total, run_guard]
 
 
 ## Returns an ArrayMesh whose surfaces follow `SURFACES` (empty surfaces are
 ## omitted, and `mesh.set_meta("surfaces", [...])` records what is present).
 static func build(variant: int, slot: int, density: float) -> ArrayMesh:
-	var key := "%d_%d_%.2f" % [variant, slot, density]
+	variant = posmod(variant, VARIANT_COUNT)
+	slot = posmod(slot, CACHE_SLOTS)
+	var key := cache_key(variant, slot, density)
 	if _cache.has(key):
 		return _cache[key]
+	var started := Time.get_ticks_usec()
+	if run_guard:
+		builds_in_run += 1
+		push_warning("[SegmentBuilder] building '%s' while a run is active" % key)
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7919 * (slot + 1) + 104729 * variant
@@ -90,6 +142,8 @@ static func build(variant: int, slot: int, density: float) -> ArrayMesh:
 		"water": MeshKit.begin(),
 		"steel": MeshKit.begin(),
 		"concrete": MeshKit.begin(),
+		"leaf": MeshKit.begin(),
+		"leaves": MeshKit.begin(),
 	}
 
 	_build_ground(tools["ground"], variant % VARIANT_COUNT)
@@ -127,11 +181,26 @@ static func build(variant: int, slot: int, density: float) -> ArrayMesh:
 		present.append(name)
 	mesh.set_meta("surfaces", present)
 	_cache[key] = mesh
+	build_count += 1
+	build_ms_total += float(Time.get_ticks_usec() - started) / 1000.0
 	return mesh
 
 
 static func clear_cache() -> void:
 	_cache.clear()
+
+
+## Drops every cached mesh built for a *different* quality density. A preset
+## change would otherwise leave 21 unused meshes of the old density alive for
+## the rest of the session, which is real GPU memory on a 2 GB phone.
+static func prune_density(keep: float) -> int:
+	var suffix := "_%.2f" % keep
+	var dropped := 0
+	for key in _cache.keys():
+		if not String(key).ends_with(suffix):
+			_cache.erase(key)
+			dropped += 1
+	return dropped
 
 
 ## Pick one of the three photographed shopfronts, so a street is not wallpapered
@@ -189,12 +258,14 @@ static func _build_road(st: SurfaceTool, paint_st: SurfaceTool,
 	MeshKit.add_uv_ground(st, Vector3(-ROAD_HALF, 0, h), Vector3(ROAD_HALF, 0, h),
 			Vector3(ROAD_HALF, 0, -h), Vector3(-ROAD_HALF, 0, -h), 2.4)
 	# Dashed lane dividers between the three lanes (x = +-1.2).
-	var paint := Color("#e8e3d3")
+	# Worn thermoplastic, not studio white: real Khartoum paint is grey-yellow
+	# after a season of dust and tyres.
+	var paint := Color("#cfc7b4")
 	var z := -h
 	while z < h:
 		for lane_edge: float in [-1.2, 1.2]:
 			_add_flat_box(paint_st, Vector3(lane_edge, 0.03, z + 1.5),
-					Vector3(0.16, 0.012, 2.6), paint)
+					Vector3(0.15, 0.012, 2.6), paint)
 		z += 5.6
 	# Occasional crosswalk / speed bump paint for rhythm.
 	if rng.randf() < 0.5:
@@ -251,7 +322,7 @@ static func _build_street(tools: Dictionary, rng: RandomNumberGenerator, density
 			var fz := -LENGTH * 0.5 + 6.0 + float(i) * 12.0 + rng.randf_range(-2.0, 2.0)
 			_lamp(st, side, fz)
 			if rng.randf() < 0.7:
-				_acacia(st, side * (INNER + 1.4), fz + 4.0, rng)
+				_acacia(st, tools["leaves"], side * (INNER + 1.4), fz + 4.0, rng)
 			if rng.randf() < 0.5 * density:
 				_parked_car(st, side, fz + 6.5, rng)
 		if rng.randf() < 0.5:
@@ -347,7 +418,8 @@ static func _lamp(st: SurfaceTool, side: float, z: float) -> void:
 ## road - the single most cartoonish thing left in the frame. The canopy is now a
 ## fan of narrow, slightly drooping leaf clusters around a dark core, in muted
 ## olive tones, so it reads as a tree at chase-camera distance and costs 12 quads.
-static func _acacia(st: SurfaceTool, x: float, z: float, rng: RandomNumberGenerator) -> void:
+static func _acacia(st: SurfaceTool, leaves_st: SurfaceTool, x: float, z: float,
+		rng: RandomNumberGenerator) -> void:
 	var h := rng.randf_range(2.6, 3.8)
 	var base := Vector3(x, 0.16, z)
 	MeshKit.add_cylinder(st, base, 0.17, h, Color("#54402e"), 5, 0.12)
@@ -359,31 +431,26 @@ static func _acacia(st: SurfaceTool, x: float, z: float, rng: RandomNumberGenera
 				base + Vector3(0.13, h * 0.55, 0.13), tip + Vector3(0.13, 0, 0.13), tip,
 				Color("#6b5238"))
 	var crown := h + 0.55
-	var spread := rng.randf_range(1.5, 2.3)
-	# Many small, narrow leaflet clusters rather than a few big blades: at 3-4 m
-	# from the chase camera a 1.4 m leaf reads as a shard, not a tree.
-	var leaves := 22
-	for i in leaves:
-		var a := TAU * float(i) / float(leaves) + rng.randf_range(-0.12, 0.12)
+	var spread := rng.randf_range(1.6, 2.4)
+	var core := base + Vector3(0, crown, 0)
+	# Dome of alpha cluster cards. Each card faces a different way, so from any
+	# camera angle several overlap and the crown reads as foliage with sky
+	# showing through it - instead of the old fan of solid green blades.
+	var cards := 13
+	for i in cards:
+		var a := TAU * float(i) / float(cards) + rng.randf_range(-0.18, 0.18)
 		var dir := Vector3(cos(a), 0.0, sin(a))
-		var arm := spread * rng.randf_range(0.55, 1.0)
-		var droop := rng.randf_range(0.12, 0.6)
-		var mid := base + Vector3(0, crown + 0.30, 0) + dir * (arm * 0.5)
-		var tip := base + Vector3(0, crown - droop, 0) + dir * arm
-		var perp := Vector3(-dir.z, 0.0, dir.x) * rng.randf_range(0.16, 0.26)
-		var col: Color = PALETTE["leaf"] if i % 3 else PALETTE["leaf_dark"]
-		MeshKit.add_quad(st, mid - perp, mid + perp, tip + perp * 0.4, tip - perp * 0.4,
-				col.darkened(rng.randf_range(0.0, 0.14)))
-	# A second, tighter tier above fills the crown silhouette.
-	for i in 10:
-		var a := TAU * float(i) / 10.0 + 0.3
-		var dir := Vector3(cos(a), 0.0, sin(a))
-		var arm := spread * 0.5 * rng.randf_range(0.7, 1.1)
-		var mid := base + Vector3(0, crown + 0.95, 0) + dir * (arm * 0.5)
-		var tip := base + Vector3(0, crown + 0.55, 0) + dir * arm
-		var perp := Vector3(-dir.z, 0.0, dir.x) * 0.15
-		MeshKit.add_quad(st, mid - perp, mid + perp, tip + perp * 0.4, tip - perp * 0.4,
-				PALETTE["leaf"].darkened(0.08))
+		var arm := spread * rng.randf_range(0.70, 1.15)
+		var card := rng.randf_range(1.15, 1.75)
+		var centre: Vector3 = core + dir * (arm * 0.55) + Vector3(0, rng.randf_range(-0.10, 0.45), 0)
+		var shade := rng.randf_range(0.70, 1.0)
+		var tint := Color(shade, shade * 1.03, shade * 0.9)
+		MeshKit.add_quad(leaves_st,
+				centre - dir * card * 0.5 - Vector3(0, card * 0.42, 0),
+				centre + dir * card * 0.5 - Vector3(0, card * 0.42, 0),
+				centre + dir * card * 0.5 + Vector3(0, card * 0.42, 0),
+				centre - dir * card * 0.5 + Vector3(0, card * 0.42, 0),
+				tint)
 	# Dark core under the leaves fills the gap when seen from below.
 	MeshKit.add_cylinder(st, base + Vector3(0, crown - 0.25, 0), spread * 0.34, 0.35,
 			PALETTE["leaf_dark"].darkened(0.15), 7)
@@ -424,7 +491,8 @@ static func _build_market(tools: Dictionary, rng: RandomNumberGenerator, density
 				_stall(st, side, z, rng)
 			z += rng.randf_range(7.0, 10.0)
 		for i in 4:
-			_acacia(st, side * (INNER + 0.6), -LENGTH * 0.5 + 5.0 + float(i) * 10.0, rng)
+			_acacia(st, tools["leaves"], side * (INNER + 0.6),
+					-LENGTH * 0.5 + 5.0 + float(i) * 10.0, rng)
 	# Hanging bulb strings across the lane (very Khartoum souq). They sit at
 	# 7 m - above the 4.5 m chase camera - so bulbs never fill the lens.
 	for i in 5:
@@ -454,7 +522,15 @@ static func _stall(st: SurfaceTool, side: float, z: float,
 		for sz: float in [-1.25, 1.25]:
 			MeshKit.add_box(st, Vector3(x + sx, 1.4, z + sz), Vector3(0.07, 2.2, 0.07),
 					PALETTE["metal"])
-	MeshKit.add_box(st, Vector3(x, 2.5, z), Vector3(2.4, 0.1, 3.0), cloth)
+	# Striped canvas: six slats across the 2.4 m span, alternating the stall
+	# colour with sun-bleached cotton. A single flat slab reads as a plastic
+	# sheet; the slats catch the low sun one at a time.
+	for i in 6:
+		var sw := 0.4
+		var sx := x - 1.2 + sw * 0.5 + float(i) * sw
+		var slat: Color = cloth if i % 2 == 0 else cloth.lightened(0.24)
+		MeshKit.add_box(st, Vector3(sx, 2.5 - float(i % 2) * 0.012, z),
+				Vector3(sw - 0.015, 0.1, 3.0), slat)
 	MeshKit.add_box(st, Vector3(x - side * 0.9, 2.32, z), Vector3(0.9, 0.06, 3.0),
 			cloth.darkened(0.18))
 	# Goods: crates, sacks, spice bowls.
@@ -482,7 +558,7 @@ static func _build_corniche(tools: Dictionary, rng: RandomNumberGenerator,
 	while z < LENGTH * 0.5:
 		_railing(st, -1.0, z, 2.0, 1.05)
 		if rng.randf() < density:
-			_palm(st, Vector3(-(INNER + 0.4), 0.16, z + 1.0), rng)
+			_palm(st, tools["leaf"], Vector3(-(INNER + 0.4), 0.16, z + 1.0), rng)
 		z += 3.0
 	for i in 2:
 		_lamp(st, 1.0, -LENGTH * 0.5 + 10.0 + float(i) * 18.0)
@@ -536,7 +612,8 @@ static func _railing(st: SurfaceTool, side: float, z: float, span: float, height
 ## Nile palm. The fronds are long and *narrow*: a 0.9 m wide blade seen from
 ## 3 m away is a green sheet, which is exactly what the old version looked like.
 ## Nine 0.2 m fronds per crown read as a palm at chase-camera distance.
-static func _palm(st: SurfaceTool, base: Vector3, rng: RandomNumberGenerator) -> void:
+static func _palm(st: SurfaceTool, leaf_st: SurfaceTool, base: Vector3,
+		rng: RandomNumberGenerator) -> void:
 	var h := rng.randf_range(5.2, 7.8)
 	# Slight lean, so a row of palms is not a picket fence.
 	var lean := Vector3(rng.randf_range(-0.35, 0.35), 0, rng.randf_range(-0.25, 0.25))
@@ -544,23 +621,36 @@ static func _palm(st: SurfaceTool, base: Vector3, rng: RandomNumberGenerator) ->
 	MeshKit.add_cylinder(st, base, 0.2, h, Color("#6f5940"), 6, 0.13)
 	MeshKit.add_cylinder(st, top - Vector3(0, 0.5, 0), 0.42, 0.55,
 			Color("#4a3a28"), 6)
-	for i in 9:
-		var a := TAU * float(i) / 9.0 + rng.randf_range(-0.2, 0.2)
+	# Fibrous crown core: without it the fronds radiate from thin air and the
+	# crown reads as a spider rather than a palm.
+	MeshKit.add_cylinder(st, top - Vector3(0, 0.9, 0), 0.34, 0.55,
+			Color("#6b5a3a"), 7)
+	# 13 textured fronds per crown. Each one is a single quad running from the
+	# crown to the tip, mapped 0..1 across `palm_frond.png` - the texture carries
+	# the leaflets, so the silhouette is a palm instead of a green shard.
+	for i in 16:
+		var a := TAU * float(i) / 16.0 + rng.randf_range(-0.16, 0.16)
 		var dir := Vector3(cos(a), 0, sin(a))
-		var reach := rng.randf_range(1.5, 2.3)
-		var mid := top + dir * (reach * 0.55) + Vector3(0, 0.3, 0)
-		var tip := top + dir * reach + Vector3(0, -rng.randf_range(0.5, 1.1), 0)
-		var perp := Vector3(-dir.z, 0.25, dir.x) * rng.randf_range(0.14, 0.22)
-		var col: Color = PALETTE["palm"].darkened(rng.randf_range(0.0, 0.2))
-		MeshKit.add_quad(st, mid - perp, mid + perp, tip + perp * 0.3, tip - perp * 0.3, col)
-	# Dead fronds hanging under the crown - every Khartoum palm has them.
-	for i in 4:
-		var a := TAU * float(i) / 4.0 + 0.4
+		var reach := rng.randf_range(2.1, 2.9)
+		# Younger fronds stand up, older ones droop: the crown has a profile.
+		var lift := rng.randf_range(0.35, 0.8)
+		var droop := rng.randf_range(0.6, 1.5)
+		var root: Vector3 = top + dir * 0.18 + Vector3(0, lift, 0)
+		var tip: Vector3 = top + dir * reach + Vector3(0, lift - droop, 0)
+		var perp := Vector3(-dir.z, 0.0, dir.x) * rng.randf_range(0.40, 0.56)
+		var shade := rng.randf_range(0.72, 1.0)
+		var tint := Color(shade, shade * 1.04, shade * 0.88)
+		MeshKit.add_quad(leaf_st, root - perp, tip - perp * 0.55,
+				tip + perp * 0.55, root + perp, tint)
+	# Dead fronds hanging under the crown - every Khartoum palm has them. Same
+	# texture, sun-bleached brown: five extra quads, no extra asset.
+	for i in 5:
+		var a := TAU * float(i) / 5.0 + 0.4
 		var dir := Vector3(cos(a), 0, sin(a))
-		var tip := top + dir * 0.9 + Vector3(0, -1.5, 0)
-		var perp := Vector3(-dir.z, 0.0, dir.x) * 0.12
-		MeshKit.add_quad(st, top - perp, top + perp, tip + perp, tip - perp,
-				Color("#8a7448"))
+		var tip: Vector3 = top + dir * 1.05 + Vector3(0, -1.7, 0)
+		var perp := Vector3(-dir.z, 0.0, dir.x) * 0.26
+		MeshKit.add_quad(leaf_st, top - perp, tip - perp * 0.7, tip + perp * 0.7,
+				top + perp, Color("#9c8352"))
 
 
 # ---------------------------------------------------------------------------
@@ -577,7 +667,7 @@ static func _build_neighbourhood(tools: Dictionary, rng: RandomNumberGenerator,
 			z += span + rng.randf_range(1.5, 4.0)
 		for i in 3:
 			var fz := -LENGTH * 0.5 + 5.0 + float(i) * 12.0 + rng.randf_range(-2.0, 2.0)
-			_acacia(st, side * (ROAD_HALF + 1.0), fz, rng)
+			_acacia(st, tools["leaves"], side * (ROAD_HALF + 1.0), fz, rng)
 			if rng.randf() < density:
 				_lamp(st, side, fz + 5.0)
 		# Laundry lines between the walls.
@@ -790,7 +880,7 @@ static func _build_bahri(tools: Dictionary, rng: RandomNumberGenerator,
 			z += span + rng.randf_range(2.0, 4.0)
 		# Acacias + a lamp, same rhythm as the reference photo.
 		for i in 2:
-			_acacia(art, side * (ROAD_HALF + 0.9),
+			_acacia(art, tools["leaves"], side * (ROAD_HALF + 0.9),
 					-LENGTH * 0.5 + 10.0 + float(i) * 16.0, rng)
 		_lamp(art, side, -LENGTH * 0.5 + 6.0)
 

@@ -24,11 +24,12 @@ is *not* shipped with the game.
 from __future__ import annotations
 
 import math
+import random
 from PIL import ImageDraw
 import os
 import sys
 
-from PIL import Image, ImageFilter, ImageChops, ImageStat
+from PIL import Image, ImageFilter, ImageChops, ImageStat, ImageOps
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "art_src")
@@ -543,6 +544,108 @@ def build_road() -> None:
     save(roughness_from(narrow), "asphalt_photo_rough.png")
 
 
+def _super(img: Image.Image, scale: int) -> Image.Image:
+    return img.resize((img.width // scale, img.height // scale), Image.LANCZOS)
+
+
+def build_frond() -> None:
+    """A single date-palm frond, stem on the left, tip on the right.
+
+    The street used to build palm crowns out of nine flat green quads, which is
+    the single most cartoonish thing left in the frame (long triangles with no
+    leaflets). A photographed-looking alpha frond costs one texture and turns
+    the same quads into a real palm silhouette - leaflets, midrib, the lot.
+    """
+    print("frond")
+    ss = 3
+    w, h = 512, 128
+    img = Image.new("RGBA", (w * ss, h * ss), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    rng = random.Random(20261023)
+
+    def rib_y(t: float) -> float:
+        return (h * 0.5 + math.sin(t * math.pi) * 10.0) * ss
+
+    def rib_x(t: float) -> float:
+        return (6.0 + t * (w - 16.0)) * ss
+
+    # Leaflets, densest and longest around the middle of the frond.
+    steps = 96
+    for i in range(steps):
+        t = i / float(steps - 1)
+        x = rib_x(t)
+        y = rib_y(t)
+        env = math.sin(math.pi * min(1.0, 0.06 + t * 0.98)) ** 0.55
+        length = (56.0 * env * (1.0 - 0.24 * t) + 8.0) * ss
+        sweep = math.radians(34.0 + 26.0 * t)          # forward rake
+        for side in (-1.0, 1.0):
+            ang = math.radians(90.0) * side - math.pi * 0.0
+            # Leaflet direction: mostly across the rib, swept towards the tip.
+            ang = sweep * (1.0 if side < 0 else -1.0) + (math.pi * 0.5 * side)
+            dx = math.cos(ang)
+            dy = math.sin(ang) * 1.0
+            tip_x = x + dx * length
+            tip_y = y + dy * length * 0.62
+            base_w = (4.6 + 3.4 * env) * ss
+            # A tapered quad: two base points either side of the rib, one tip.
+            nx, ny = -dy, dx
+            shade = 0.82 + rng.random() * 0.30
+            col = (int(74 * shade), int(104 * shade), int(56 * shade), 255)
+            draw.polygon([
+                (x - nx * base_w * 0.5, y - ny * base_w * 0.5),
+                (x + nx * base_w * 0.5, y + ny * base_w * 0.5),
+                (tip_x, tip_y),
+            ], fill=col)
+
+    # Midrib on top of the leaflets.
+    pts = [(rib_x(i / 60.0), rib_y(i / 60.0)) for i in range(61)]
+    draw.line(pts, fill=(96, 108, 62, 255), width=int(5.5 * ss), joint="curve")
+
+    _super(img, ss).save(os.path.join(OUT, "palm_frond.png"))
+
+
+def build_leaf_cluster() -> None:
+    """Round acacia crown sprite: many small leaves, alpha between them."""
+    print("leaf cluster")
+    ss = 3
+    size = 256
+    img = Image.new("RGBA", (size * ss, size * ss), (0, 0, 0, 0))
+    rng = random.Random(7717)
+    cx, cy = size * ss * 0.5, size * ss * 0.52
+    count = 420
+    for i in range(count):
+        # Clusters thin out towards the edge of the crown.
+        r = (size * ss * 0.46) * (rng.random() ** 0.62)
+        a = rng.random() * math.tau
+        x = cx + math.cos(a) * r
+        y = cy + math.sin(a) * r * 0.72
+        leaf_w = (15.0 + rng.random() * 13.0) * ss * 0.5
+        leaf_h = leaf_w * (0.38 + rng.random() * 0.16)
+        tile = Image.new("RGBA", (int(leaf_w * 3), int(leaf_h * 3)), (0, 0, 0, 0))
+        td = ImageDraw.Draw(tile)
+        shade = 0.60 + rng.random() * 0.55
+        td.ellipse([leaf_w, leaf_h, leaf_w * 2, leaf_h * 2],
+                   fill=(int(70 * shade), int(100 * shade), int(52 * shade), 255))
+        tile = tile.rotate(rng.uniform(0.0, 180.0), resample=Image.BICUBIC, expand=False)
+        img.alpha_composite(tile, (int(x - leaf_w), int(y - leaf_h)))
+    _super(img, ss).save(os.path.join(OUT, "leaf_cluster.png"))
+
+
+def build_grain() -> None:
+    """Multiplicative micro-grain for the asphalt.
+
+    The road photo is tiled every 2.4 m, which at 40 m looks like wallpaper.
+    A high-pass of the same photo, centred on mid-grey and multiplied on top,
+    keeps the colour but replaces the repeat with per-pixel grit.
+    """
+    print("grain")
+    src = cover_crop(load("asphalt.jpg").convert("L"), (DETAIL, DETAIL))
+    blur = src.filter(ImageFilter.GaussianBlur(9))
+    diff = ImageOps.autocontrast(ImageChops.difference(src, blur), cutoff=1)
+    grain = diff.point(lambda v: 116 + int(v * 0.30))
+    save(grain.convert("RGB"), "asphalt_grain.jpg", quality=86)
+
+
 def build_pavement() -> None:
     print("pavement")
     pav = mirror_tile(cover_crop(load("pavement.jpg"), (ALBEDO, ALBEDO)))
@@ -617,6 +720,7 @@ def main(argv: list[str]) -> int:
             "sky_khartoum.jpg", "skyline_khartoum.png", "menu_bg.jpg",
             "asphalt_photo.jpg",
             "asphalt_photo_normal.png", "asphalt_photo_rough.png",
+            "asphalt_grain.jpg", "palm_frond.png", "leaf_cluster.png",
             "pavement_photo.jpg", "pavement_photo_normal.png", "water_photo.jpg",
             "facade_shops.jpg", "facade_ochre.jpg", "facade_plaster.jpg",
             "facade_atlas.jpg",
@@ -631,6 +735,9 @@ def main(argv: list[str]) -> int:
 
     build_sky()
     build_road()
+    build_grain()
+    build_frond()
+    build_leaf_cluster()
     build_pavement()
     build_water()
     build_facades()

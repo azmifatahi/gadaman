@@ -22,9 +22,9 @@ const KIT := preload("res://scripts/world/mesh_kit.gd")
 ## its RNG seed. Requiring one specific name fails a perfectly good street.
 const EXPECTED := {
 	0: ["road", "walk", "art", "ground", "facade*"],
-	1: ["road", "walk", "art", "ground", "facade*"],
-	2: ["road", "walk", "art", "ground", "facade*", "water", "concrete"],
-	3: ["road", "walk", "art", "ground", "facade*"],
+	1: ["road", "walk", "art", "ground", "facade*", "leaves"],
+	2: ["road", "walk", "art", "ground", "facade*", "water", "concrete", "leaf"],
+	3: ["road", "walk", "art", "ground", "facade*", "leaves"],
 	4: ["road", "walk", "art", "ground", "water", "steel", "concrete"],
 	5: ["road", "walk", "art", "ground", "water", "concrete"],
 	6: ["road", "walk", "art", "ground", "facade*"],
@@ -52,6 +52,7 @@ func _initialize() -> void:
 	print("[CIWorld] root children: %s" % ", ".join(autoloads))
 	_check_textures()
 	_check_segments()
+	_check_warm_up()
 	_check_settings()
 	# Always echo what was actually built: when this job fails in CI the log is
 	# often unreachable, but annotations are not.
@@ -73,7 +74,8 @@ func _check_textures() -> void:
 		"asphalt_photo.jpg", "asphalt_photo_normal.png", "asphalt_photo_rough.png",
 		"pavement_photo.jpg", "pavement_photo_normal.png", "water_photo.jpg",
 		"facade_atlas.jpg", "truss_steel.jpg", "truss_steel_normal.png",
-		"concrete_photo.jpg",
+		"concrete_photo.jpg", "asphalt_grain.jpg", "palm_frond.png",
+		"leaf_cluster.png",
 	]
 	for name in required:
 		var path: String = "res://assets/textures/" + String(name)
@@ -117,7 +119,7 @@ func _check_segments() -> void:
 				# A surface with a texture needs UVs, or the photo collapses to
 				# one pixel.
 				if String(names[i]) in ["road", "walk", "facade", "facade_b", "facade_c",
-						"water", "steel", "concrete"]:
+						"water", "steel", "concrete", "leaf", "leaves"]:
 					if arrays.size() <= Mesh.ARRAY_TEX_UV or (arrays[Mesh.ARRAY_TEX_UV] as PackedVector2Array).is_empty():
 						_problems.append("variant %d surface '%s' has no UVs" % [variant, names[i]])
 			if tris < 200:
@@ -127,6 +129,46 @@ func _check_segments() -> void:
 			}
 	print("[CIWorld] districts: %d variants x %d slots built" % [
 		SEGMENTS.VARIANT_COUNT, SEGMENTS.CACHE_SLOTS])
+
+
+## The freeze "after a distance" was a district mesh being generated on the
+## frame it first appeared. `warm_all()` must therefore cover the entire cache
+## matrix, and recycling must never build again.
+func _check_warm_up() -> void:
+	var started := Time.get_ticks_msec()
+	var built := SEGMENTS.warm_all(1.0)
+	var warm_ms := Time.get_ticks_msec() - started
+	# Everything is already in the cache from _check_segments(), so this call is
+	# the pure lookup path the game uses at runtime.
+	if built != 0:
+		_problems.append("warm_all rebuilt %d meshes that were already cached" % built)
+	SEGMENTS.run_guard = true
+	var before := SEGMENTS.build_count
+	for i in 600:
+		SEGMENTS.build(i % SEGMENTS.VARIANT_COUNT, i % SEGMENTS.CACHE_SLOTS, 1.0)
+	if SEGMENTS.build_count != before:
+		_problems.append("%d district meshes were rebuilt during the recycle loop" % [
+			SEGMENTS.build_count - before])
+	if SEGMENTS.builds_in_run != 0:
+		_problems.append("%d builds were counted while the run guard was on" % [
+			SEGMENTS.builds_in_run])
+	SEGMENTS.run_guard = false
+	# A cold build is what used to happen mid-run; keep its cost visible in CI.
+	SEGMENTS.clear_cache()
+	var cold := Time.get_ticks_msec()
+	var cold_built := SEGMENTS.warm_all(1.0)
+	var cold_ms := Time.get_ticks_msec() - cold
+	_summary["warm_up"] = {
+		"meshes": cold_built, "cold_ms": cold_ms, "cached_lookup_ms": warm_ms,
+		"cache_after": SEGMENTS.build_count,
+	}
+	print("[CIWorld] warm-up: %d meshes built in %d ms (cold); cache hits afterwards" % [
+		cold_built, cold_ms])
+	if cold_built != SEGMENTS.VARIANT_COUNT * SEGMENTS.CACHE_SLOTS:
+		_problems.append("warm_all built %d meshes, expected %d" % [
+			cold_built, SEGMENTS.VARIANT_COUNT * SEGMENTS.CACHE_SLOTS])
+	# Refill the cache so the rest of the checks see warm data.
+	SEGMENTS.warm_all(1.0)
 
 
 func _check_settings() -> void:
